@@ -388,8 +388,13 @@ class FakeStructured:
         self.schema = schema
 
     async def ainvoke(self, prompt):
+        if self.schema is st.QueryUnderstanding:  # Phase 6 query understanding (was QuestionType)
+            return st.QueryUnderstanding(
+                is_simple=FakeStructured.simple, is_follow_up=False, resolved_query="", intent="unknown",
+                technology="", time_sensitivity="unknown", context_topics=[])
         if self.schema is st.QuestionType:
             return st.QuestionType(is_simple=FakeStructured.simple)
+        # Deliberately the legacy planner shape (no source hints): it must keep working.
         return st.SearchPlan(sub_questions=["sub one", "sub two", "sub three"])
 
 

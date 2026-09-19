@@ -28,9 +28,21 @@ BASELINE_ROUTES = {
     ("POST", "/auth/login"),
     ("POST", "/auth/register"),
 }
+# Phase 6 added these (the conversation endpoints); the 16 routes above are unchanged.
+PHASE6_ROUTES = {
+    ("DELETE", "/sessions/{session_id}"),
+    ("GET", "/sessions"),
+    ("GET", "/sessions/{session_id}"),
+}
 BASELINE_NODES = {
     "semantic_cache_node", "classify_node", "simple_search_node", "planner_node",
     "search_node", "synthesize_node", "save_to_cache_node",
+}
+# Phase 6 replaced the single synthesis step (synthesize_node) with the evidence pipeline; every
+# other baseline node is still there, unchanged in name.
+PHASE6_NODES = (BASELINE_NODES - {"synthesize_node"}) | {
+    "evidence_collection", "gap_detection", "targeted_search", "synthesis_node",
+    "critic_node", "retry_node", "format_response",
 }
 FRAMEWORK_PATHS = {"/openapi.json", "/docs", "/docs/oauth2-redirect", "/redoc"}
 
@@ -74,7 +86,7 @@ class DomainIsolationTests(unittest.TestCase):
 
 
 class BaselineSnapshotTests(unittest.TestCase):
-    def test_application_routes_unchanged(self):
+    def test_application_routes_are_the_baseline_plus_the_session_endpoints(self):
         routes = {
             (method, r.path)
             for r in app.routes
@@ -82,11 +94,13 @@ class BaselineSnapshotTests(unittest.TestCase):
             for method in (getattr(r, "methods", None) or ())
             if method != "HEAD"
         }
-        self.assertEqual(routes, BASELINE_ROUTES)
+        self.assertEqual(routes, BASELINE_ROUTES | PHASE6_ROUTES)
+        self.assertTrue(BASELINE_ROUTES <= routes)
 
-    def test_graph_nodes_unchanged(self):
+    def test_graph_nodes_are_the_baseline_plus_the_phase6_pipeline(self):
         nodes = set(compiled_graph.get_graph().nodes) - {"__start__", "__end__"}
-        self.assertEqual(nodes, BASELINE_NODES)
+        self.assertEqual(nodes, PHASE6_NODES)
+        self.assertTrue((BASELINE_NODES - {"synthesize_node"}) <= nodes)
 
 
 if __name__ == "__main__":

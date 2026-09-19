@@ -25,10 +25,13 @@ from pydantic import AfterValidator, BaseModel, ConfigDict, Field, model_validat
 from research_app.domain.enums import (
     Complexity,
     CriticIssueKind,
+    CriticSeverity,
+    CriticVerdict,
     GapKind,
     QueryIntent,
     ResultStatus,
     RunStatus,
+    SourceIntent,
     SourceType,
     TaskStatus,
     TimeSensitivity,
@@ -140,6 +143,12 @@ class ResearchTask(DomainModel):
     preferred_domains: list[str] = Field(default_factory=list)
     priority: int = Field(default=0, ge=0)
     status: TaskStatus = TaskStatus.PENDING
+    # Phase 6. ``source_types`` is what the router DECIDED; the fields below are what the
+    # planner PROPOSED. ``suggested_sources`` keeps the raw strings on purpose: the router
+    # validates them and reports the ones it drops.
+    source_intent: Optional[SourceIntent] = None
+    suggested_sources: list[str] = Field(default_factory=list)
+    technology: Optional[str] = None
 
     @model_validator(mode="after")
     def _default_search_query(self) -> "ResearchTask":
@@ -260,6 +269,11 @@ class Citation(DomainModel):
     title: Optional[str] = None
     source_type: SourceType = SourceType.WEB
     excerpt: Optional[str] = None
+    # Phase 6 (all optional): the numbered form the UI and the database use.
+    index: Optional[int] = Field(default=None, ge=1)
+    domain: Optional[str] = None
+    snippet: Optional[str] = None
+    retrieved_at: Optional[UtcDatetime] = None
 
 
 # --------------------------------------------------------------------------- gaps / critic
@@ -287,6 +301,7 @@ class CriticIssue(DomainModel):
     kind: CriticIssueKind
     description: str
     evidence_ids: list[str] = Field(default_factory=list)
+    severity: Optional[CriticSeverity] = None  # Phase 6
 
 
 class CriticResult(DomainModel):
@@ -298,6 +313,9 @@ class CriticResult(DomainModel):
     issues: list[CriticIssue] = Field(default_factory=list)
     feedback: str = ""
     retry_tasks: list[ResearchTask] = Field(default_factory=list)
+    # Phase 6: ``passed`` is True exactly when the verdict is GOOD.
+    verdict: Optional[CriticVerdict] = None
+    suggestions: list[str] = Field(default_factory=list)
 
 
 # --------------------------------------------------------------------------- run

@@ -67,6 +67,11 @@ class GapKind(str, Enum):
     MISSING_SUBQUESTION = "missing_subquestion"
     WEAK_EVIDENCE = "weak_evidence"
     UNSUPPORTED_CLAIM = "unsupported_claim"
+    # Phase 6
+    MISSING_COVERAGE = "missing_coverage"
+    ORPHAN_CITATION = "orphan_citation"
+    WEAK_SOURCE = "weak_source"
+    INCOMPLETE = "incomplete"
     CONTRADICTION = "contradiction"
     OTHER = "other"
 
@@ -79,3 +84,35 @@ class CriticIssueKind(str, Enum):
     CONTRADICTION = "contradiction"
     MISSING_INFORMATION = "missing_information"
     UNSUPPORTED_CLAIM = "unsupported_claim"
+    # Phase 6
+    MISSING_COVERAGE = "missing_coverage"
+    ORPHAN_CITATION = "orphan_citation"
+    WEAK_SOURCE = "weak_source"
+    INCOMPLETE = "incomplete"
+
+
+class SourceIntent(str, Enum):
+    """What kind of source a sub-question needs (Phase 6). Emitted by the planner, mapped to
+    sources by ``route_task``. Independent of ``QueryIntent`` (that describes the whole
+    question; this describes one sub-question's source needs)."""
+
+    TECHNICAL_HOWTO = "technical_howto"
+    LIBRARY_USAGE = "library_usage"
+    CODE_IMPLEMENTATION = "code_implementation"
+    TROUBLESHOOTING = "troubleshooting"
+    COMMUNITY_EXPERIENCE = "community_experience"
+    GENERAL_RESEARCH = "general_research"
+    COMPARISON = "comparison"
+    CURRENT_EVENTS = "current_events"
+
+
+class CriticVerdict(str, Enum):
+    GOOD = "good"
+    NEEDS_IMPROVEMENT = "needs_improvement"
+    BAD = "bad"
+
+
+class CriticSeverity(str, Enum):
+    HIGH = "high"
+    MEDIUM = "medium"
+    LOW = "low"

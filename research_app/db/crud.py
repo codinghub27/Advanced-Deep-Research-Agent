@@ -133,7 +133,7 @@ def create_session(user_id: int, title: str, db: Session):
 def get_sessions(user_id: int, db: Session):
     return (
         db.query(ChatSession)
-        .filter(ChatSession.user_id == user_id)
+        .filter(ChatSession.user_id == user_id, ChatSession.is_active.is_(True))
         .order_by(ChatSession.created_at.desc())
         .all()
     )
@@ -141,11 +141,16 @@ def get_sessions(user_id: int, db: Session):
 
 def get_user_session(session_id: int, user_id: int, db: Session):
     """
-    Return the session only if it belongs to the given user, else None.
+    Return the session only if it belongs to the given user and has not been
+    soft-deleted (Phase 6 ``is_active``), else None.
     """
     return (
         db.query(ChatSession)
-        .filter(ChatSession.id == session_id, ChatSession.user_id == user_id)
+        .filter(
+            ChatSession.id == session_id,
+            ChatSession.user_id == user_id,
+            ChatSession.is_active.is_(True),
+        )
         .first()
     )
 

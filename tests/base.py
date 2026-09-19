@@ -7,7 +7,7 @@ from sqlalchemy.pool import StaticPool
 
 from research_app.auth.auth import create_access_token
 from research_app.db.crud import create_user, create_session, save_query
-from research_app.db.database import Base, get_db
+from research_app.db.database import Base, get_db, get_session_factory
 from research_app.main import app
 
 
@@ -31,6 +31,7 @@ class ApiTestCase(unittest.TestCase):
                 db.close()
 
         app.dependency_overrides[get_db] = override_get_db
+        app.dependency_overrides[get_session_factory] = lambda: self.SessionLocal
         self.client = TestClient(app)
 
     def tearDown(self):

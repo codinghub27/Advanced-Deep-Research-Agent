@@ -1,8 +1,9 @@
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 from sqlalchemy import (
-Integer,String,DateTime,ForeignKey,JSON
+Integer,String,DateTime,ForeignKey,JSON,Boolean,Text,Uuid,UniqueConstraint,true
 )
 from datetime import datetime, timezone
+import uuid
 
 from research_app.db.database import Base
 
@@ -53,6 +54,20 @@ class Session(Base):
         DateTime,
         default=_utc_now,
     )
+    # Phase 6. Nullable: rows that predate the column are backfilled by the migration.
+    updated_at:Mapped[datetime]=mapped_column(
+        DateTime,
+        default=_utc_now,
+        onupdate=_utc_now,
+        nullable=True,
+    )
+    # Soft delete (DELETE /sessions/{id}); inactive sessions are treated as not found.
+    is_active:Mapped[bool]=mapped_column(
+        Boolean,
+        default=True,
+        server_default=true(),
+        nullable=False,
+    )
     user=relationship(
         "User",
         back_populates="sessions"
@@ -61,6 +76,12 @@ class Session(Base):
         "Query",
         back_populates="session",
         cascade="all, delete"
+    )
+    conversations=relationship(
+        "ResearchConversation",
+        back_populates="session",
+        cascade="all, delete-orphan",
+        order_by="ResearchConversation.turn_number",
     )
 
 class Query(Base):
@@ -93,3 +114,137 @@ class Query(Base):
         back_populates="queries",
     )
 
+
+class ResearchConversation(Base):
+    """One turn (question + cited answer) of a session. ``queries`` keeps the legacy
+    question/answer pair the UI reloads from; this table holds the research detail."""
+    __tablename__ = "research_conversations"
+    __table_args__ = (
+        UniqueConstraint("session_id", "turn_number", name="uq_research_conversations_session_turn"),
+    )
+    id:Mapped[uuid.UUID]=mapped_column(
+        Uuid,
+        primary_key=True,
+        default=uuid.uuid4,
+    )
+    session_id:Mapped[int]=mapped_column(
+        ForeignKey("sessions.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+    turn_number:Mapped[int]=mapped_column(
+        Integer,
+        nullable=False,
+    )
+    query_text:Mapped[str]=mapped_column(
+        Text,
+        nullable=False,
+    )
+    query_type:Mapped[str]=mapped_column(
+        String(50),
+        nullable=False,
+        default="",
+    )
+    is_follow_up:Mapped[bool]=mapped_column(
+        Boolean,
+        nullable=False,
+        default=False,
+    )
+    resolved_query:Mapped[str]=mapped_column(
+        Text,
+        nullable=False,
+        default="",
+    )
+    answer_text:Mapped[str]=mapped_column(
+        Text,
+        nullable=False,
+        default="",
+    )
+    confidence:Mapped[str]=mapped_column(
+        String(16),
+        nullable=False,
+        default="",
+    )
+    critic_verdict:Mapped[str]=mapped_column(
+        String(32),
+        nullable=False,
+        default="",
+    )
+    sources_consulted:Mapped[list]=mapped_column(
+        JSON,
+        nullable=False,
+        default=list,
+    )
+    subquestions:Mapped[list]=mapped_column(
+        JSON,
+        nullable=False,
+        default=list,
+    )
+    research_metadata:Mapped[dict]=mapped_column(
+        JSON,
+        nullable=False,
+        default=dict,
+    )
+    created_at:Mapped[datetime]=mapped_column(
+        DateTime,
+        default=_utc_now,
+    )
+    session=relationship(
+        "Session",
+        back_populates="conversations",
+    )
+    citations=relationship(
+        "ResearchCitation",
+        back_populates="conversation",
+        cascade="all, delete-orphan",
+        order_by="ResearchCitation.citation_index",
+    )
+
+
+class ResearchCitation(Base):
+    __tablename__ = "research_citations"
+    id:Mapped[uuid.UUID]=mapped_column(
+        Uuid,
+        primary_key=True,
+        default=uuid.uuid4,
+    )
+    conversation_id:Mapped[uuid.UUID]=mapped_column(
+        ForeignKey("research_conversations.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+    citation_index:Mapped[int]=mapped_column(
+        Integer,
+        nullable=False,
+    )
+    source_type:Mapped[str]=mapped_column(
+        String(32),
+        nullable=False,
+    )
+    title:Mapped[str]=mapped_column(
+        Text,
+        nullable=False,
+        default="",
+    )
+    url:Mapped[str]=mapped_column(
+        Text,
+        nullable=False,
+    )
+    domain:Mapped[str]=mapped_column(
+        String(255),
+        nullable=False,
+        default="",
+    )
+    snippet:Mapped[str]=mapped_column(
+        Text,
+        nullable=False,
+        default="",
+    )
+    retrieved_at:Mapped[datetime]=mapped_column(
+        DateTime,
+        nullable=True,
+    )
+    conversation=relationship(
+        "ResearchConversation",
+        back_populates="citations",
+    )

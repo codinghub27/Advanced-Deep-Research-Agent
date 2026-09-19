@@ -32,7 +32,7 @@ class SessionOwnershipTests(ApiTestCase):
     def setUp(self):
         super().setUp()
         alice_id = self.make_user("alice")
-        bob_id = self.make_user("bob")
+        bob_id = self.bob_id = self.make_user("bob")
         self.alice_session = self.make_session(alice_id, "alice-session")
         self.bob_session = self.make_session(bob_id, "bob-session")
         self.make_query(self.alice_session, "alice-secret-question", "alice-secret-answer")
@@ -103,11 +103,17 @@ class SessionOwnershipTests(ApiTestCase):
         self.assertEqual(r.json()["session_id"], self.alice_session)
         self.assertEqual(self.count(Query), 2)
 
-    def test_research_without_session_id_uses_callers_own_session(self):
+    def test_research_without_session_id_creates_a_new_session_for_the_caller(self):
+        # Phase 6 (D2): no session_id starts a NEW session (it used to reuse the latest one).
         with mock.patch("research_app.main.compiled_graph", _fake_graph()):
-            r = self.client.post("/api/research", json={"question": "hi"}, headers=self.auth("bob"))
+            r = self.client.post("/api/research", json={"question": "hi there"}, headers=self.auth("bob"))
         self.assertEqual(r.status_code, 200)
-        self.assertEqual(r.json()["session_id"], self.bob_session)
+        new_id = r.json()["session_id"]
+        self.assertNotIn(new_id, (self.alice_session, self.bob_session))
+        with self.SessionLocal() as db:
+            created = db.get(ChatSession, new_id)
+            self.assertEqual((created.user_id, created.title), (self.bob_id, "hi there"))
+        self.assertEqual(self.count(ChatSession), 3)
 
     # POST /api/research/stream
     def test_stream_with_other_users_session_is_rejected(self):

@@ -599,10 +599,14 @@ class CompiledGraphTests(NodeTestBase):
             result = await compiled_graph.ainvoke({**GRAPH_INPUTS, "question": question})
         return result, fake, llm
 
-    def test_the_graph_still_compiles_with_the_same_nodes(self):
+    def test_the_graph_still_compiles_with_the_search_nodes_unchanged(self):
+        # Phase 6 added the evidence pipeline after the search nodes; the nodes Phase 5 routes
+        # through are still there under the same names.
         nodes = set(compiled_graph.get_graph().nodes)
-        self.assertEqual(nodes, {"__start__", "__end__", "semantic_cache_node", "classify_node", "simple_search_node",
-                                 "planner_node", "search_node", "synthesize_node", "save_to_cache_node"})
+        self.assertTrue({"__start__", "__end__", "semantic_cache_node", "classify_node", "simple_search_node",
+                         "planner_node", "search_node", "save_to_cache_node"} <= nodes)
+        self.assertTrue({"evidence_collection", "gap_detection", "synthesis_node", "critic_node",
+                         "format_response"} <= nodes)
 
     async def test_complex_github_question_end_to_end(self):
         result, fake, llm = await self.run_graph(GH_Q)
@@ -683,14 +687,16 @@ class ApiCompatibilityTests(ApiTestCase):
         self.assertIn("https://github.com/langchain-ai/langgraph", urls)
         self.assertIn("https://one.example/a", urls)
         self.assertEqual(len(self.fake.of("github")), 3)
-        self.assertTrue(all(e["type"] in {"progress", "token", "sources", "cache_hit", "done", "error"} for e in events))
+        # Phase 6 added two event types ("routing", "citations"); the original ones are unchanged.
+        self.assertTrue(all(e["type"] in {"progress", "token", "sources", "cache_hit", "done", "error",
+                                          "routing", "citations"} for e in events))
 
     def test_plain_research_response_shape(self):
         response = self.client.post("/api/research", json={"question": ALL_Q, "session_id": self.sid},
                                     headers=self.auth("alice"))
         self.assertEqual(response.status_code, 200)
         body = response.json()
-        self.assertEqual(set(body), {"sub_questions", "answer", "session_id"})
+        self.assertTrue({"sub_questions", "answer", "session_id"} <= set(body))  # legacy keys kept (Phase 6 adds more)
         self.assertEqual(body["session_id"], self.sid)
         self.assertGreater(len(body["answer"]), 500)
         self.assertEqual(body["sub_questions"], ["sub one", "sub two", "sub three"])

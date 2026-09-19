@@ -4,6 +4,8 @@ hosts.py     strict hostname allowlists (GitHub, Reddit); look-alikes are reject
 adapters.py  SourceAdapter for GitHub and Reddit: Tavily restricted with ``include_domains``,
              every result URL verified, then re-typed and given URL-derived metadata
 router.py    rule-based ``route_sources(question) -> RoutePlan`` (no LLM, no scoring)
+task_router.py  Phase 6: ``route_task(task, understanding) -> RoutingDecision``; validates the
+             planner's proposals with the router rules (planner proposes, router decides)
 executor.py  concurrent, failure-isolated execution of adapters
 settings.py  SOURCE_ROUTER_* environment settings
 
@@ -42,9 +44,15 @@ from research_app.sources.routing.router import (
     route_sources,
 )
 from research_app.sources.routing.settings import RouterSettings
+from research_app.sources.routing.task_router import (
+    INTENT_DEFAULTS,
+    TECHNICAL_INTENTS,
+    route_task,
+    task_technology,
+)
 
 __all__ = [
-    "DEFAULT_MAX_RESULTS", "DomainPolicy", "DomainSourceAdapter", "GITHUB_HOSTS", "GITHUB_POLICY",
+    "DEFAULT_MAX_RESULTS", "INTENT_DEFAULTS", "TECHNICAL_INTENTS", "route_task", "task_technology", "DomainPolicy", "DomainSourceAdapter", "GITHUB_HOSTS", "GITHUB_POLICY",
     "GitHubAdapter", "REDDIT_HOSTS", "REDDIT_POLICY", "RedditAdapter", "RoutePlan", "RouteSignals",
     "RouterSettings", "SOURCE_ORDER", "WEB_ONLY", "adapter_for", "build_request", "detect_signals",
     "github_metadata", "hostname_of", "is_github_url", "is_reddit_url", "plan_technology_docs",

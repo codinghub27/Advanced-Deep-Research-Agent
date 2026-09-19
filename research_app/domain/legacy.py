@@ -115,9 +115,7 @@ def official_docs_entries(
     for doc in docs:
         if not doc.content:
             continue
-        name = doc.technology or doc.domain or "unknown"
-        label = f"{OFFICIAL_DOCS_LABEL}: {name}" + (f", version {doc.version}" if doc.version else "") + "]"
-        head = f"Query: {query[:200]}\n{label}\n{doc.url}\n"
+        head = f"Query: {query[:200]}\n{source_label(doc)}\n{doc.url}\n"
         budget = max(0, min(content_limit, entry_limit - len(head)))
         entries.append(head + doc.content[:budget])
     return entries
@@ -161,6 +159,15 @@ def _community_label(doc: SourceDocument) -> Optional[str]:
         sub = _meta(doc, "reddit").get("subreddit")
         return f"{REDDIT_LABEL}: r/{sub}]" if sub else f"{REDDIT_LABEL}]"
     return None
+
+
+def source_label(doc: SourceDocument) -> str:
+    """The label the synthesis prompt puts on a source: ``[OFFICIAL DOCUMENTATION: <tech>, version
+    <v>]``, ``[GITHUB: ...]``, ``[REDDIT: ...]`` or ``[WEB]``. Built from verified metadata only."""
+    if doc.source_type == SourceType.OFFICIAL_DOCS:
+        name = doc.technology or doc.domain or "unknown"
+        return f"{OFFICIAL_DOCS_LABEL}: {name}" + (f", version {doc.version}" if doc.version else "") + "]"
+    return _community_label(doc) or WEB_LABEL
 
 
 def community_entries(

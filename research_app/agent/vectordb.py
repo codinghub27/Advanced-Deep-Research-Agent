@@ -1,4 +1,7 @@
+import hashlib
 import logging
+from typing import Optional
+
 from dotenv import load_dotenv
 
 load_dotenv()
@@ -8,6 +11,14 @@ logger = logging.getLogger(__name__)
 CACHE_SCORE_THRESHOLD = 0.85
 
 _exact_cache: dict[str, str] = {}
+# Phase 6: what was learned while producing an answer (citations, routing report), kept next to
+# the answer so a cache hit can show its sources. Keyed by the answer text, additive to the dict
+# above, and cleared with it.
+_extras: dict[str, dict] = {}
+
+
+def _answer_key(answer: str) -> str:
+    return hashlib.sha256(answer.strip().encode("utf-8")).hexdigest()
 
 
 def _normalize(question: str) -> str:
@@ -80,9 +91,23 @@ def store_cache(question: str, answer: str) -> None:
         logger.error(f"Cache store error: {e}")
 
 
+def store_cache_extras(answer: str, extras: dict) -> None:
+    """Attach ``extras`` (citations etc.) to a cached answer."""
+    if answer and answer.strip() and extras:
+        _extras[_answer_key(answer)] = extras
+
+
+def get_cache_extras(answer: str) -> Optional[dict]:
+    """The extras stored with ``answer``, or None."""
+    if not answer or not answer.strip():
+        return None
+    return _extras.get(_answer_key(answer))
+
+
 def clear_cache():
     global _exact_cache
     _exact_cache.clear()
+    _extras.clear()
     logger.info("Cache cleared")
 
 

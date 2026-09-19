@@ -170,6 +170,53 @@
     .src-hl{font-size:12px;font-weight:600;color:var(--txt);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;margin-bottom:3px;word-break:break-word;}
     .src-snip{font-size:11px;color:var(--muted);line-height:1.4;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden;word-break:break-word;}
 
+    /* Source symbols, citation chips, sources footer/panel, router display (Phase 6).
+       All icons are inline SVG or letters: no favicon service, no request to any site. */
+    .sicon{display:inline-flex;align-items:center;justify-content:center;flex-shrink:0;}
+    .avatar{display:inline-flex;align-items:center;justify-content:center;border-radius:50%;color:#fff;font-size:10px;font-weight:700;line-height:1;border:2px solid var(--card);margin-left:-6px;}
+    /* Numbered [N] markers in the answer (superscript, coloured by source type) */
+    .citation-ref{font-family:'Fira Code',monospace;font-size:10px;vertical-align:super;line-height:0;font-weight:600;padding:0 2px;cursor:pointer;color:#818cf8;border-radius:3px;}
+    .citation-ref:hover,.citation-ref:focus-visible{text-decoration:underline;outline:none;background:rgba(255,255,255,0.06);}
+    .citation-ref[data-source-type="official_docs"]{color:#34d399;} .citation-ref[data-source-type="github"]{color:#a78bfa;} .citation-ref[data-source-type="reddit"]{color:#fb923c;}
+    [data-theme="light"] .citation-ref{color:#4f46e5;} [data-theme="light"] .citation-ref[data-source-type="official_docs"]{color:#059669;}
+    [data-theme="light"] .citation-ref[data-source-type="github"]{color:#6d28d9;} [data-theme="light"] .citation-ref[data-source-type="reddit"]{color:#c2410c;}
+    /* Sources panel under each answer (collapsible list of source cards) */
+    .sources-panel{margin-top:16px;border:1px solid var(--border);border-radius:8px;overflow:hidden;}
+    .sources-header{display:flex;align-items:center;gap:8px;width:100%;padding:10px 14px;background:rgba(255,255,255,0.03);border:none;color:var(--txt);font:inherit;font-size:13px;font-weight:600;text-align:left;cursor:pointer;}
+    .sources-header:hover,.sources-header:focus-visible{background:var(--card-h);outline:none;}
+    .sources-toggle{margin-left:auto;font-size:10px;color:var(--muted);}
+    .sources-list{display:flex;flex-direction:column;gap:2px;border-top:1px solid var(--border);} .sources-list[hidden]{display:none;}
+    .source-card{display:flex;align-items:center;gap:10px;padding:8px 14px;text-decoration:none;color:inherit;transition:background .15s;}
+    .source-card:hover,.source-card:focus-visible{background:var(--card-h);outline:none;}
+    .source-card .avatar{margin-left:0;border-color:transparent;}
+    .source-card.highlighted{background:rgba(245,158,11,0.2);}
+    .source-index{font-family:'Fira Code',monospace;font-size:11px;color:var(--muted);min-width:24px;}
+    .source-info{flex:1;min-width:0;} .source-title{font-size:13px;font-weight:500;color:var(--txt);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
+    .source-domain{font-size:11px;color:var(--muted);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
+    .source-badge{margin-left:auto;flex-shrink:0;font-size:10px;font-weight:700;padding:2px 6px;border-radius:4px;text-transform:uppercase;letter-spacing:.5px;white-space:nowrap;color:#fff;background:#6366f1;}
+    .source-badge.official_docs{background:#059669;} .source-badge.github{background:#1f2937;border:1px solid rgba(255,255,255,0.18);} .source-badge.reddit{background:#ea580c;}
+    .src-footer{display:flex;align-items:center;flex-wrap:wrap;gap:10px 14px;margin-top:18px;padding-top:14px;border-top:1px solid var(--border);}
+    .src-btn{display:inline-flex;align-items:center;gap:8px;background:rgba(255,255,255,0.05);border:1px solid var(--border);color:var(--sec);border-radius:999px;padding:5px 12px 5px 8px;font:inherit;font-size:12px;font-weight:500;cursor:pointer;transition:var(--ts);}
+    .src-btn:hover,.src-btn:focus-visible{border-color:var(--cyan);color:var(--txt);outline:none;}
+    .searched{display:inline-flex;align-items:center;flex-wrap:wrap;gap:4px 10px;font-size:11.5px;color:var(--muted);}
+    .searched-i{display:inline-flex;align-items:center;gap:5px;}
+    .sp-wrap{position:fixed;inset:0;z-index:1150;}
+    .sp-back{position:absolute;inset:0;background:rgba(0,0,0,0.45);}
+    .sp{position:absolute;top:0;right:0;bottom:0;width:min(440px,100vw);background:var(--panel);border-left:1px solid var(--border);box-shadow:var(--sh);display:flex;flex-direction:column;}
+    .sp-head{display:flex;align-items:center;justify-content:space-between;padding:16px 18px;border-bottom:1px solid var(--border);color:var(--txt);}
+    .sp-x{background:transparent;border:none;color:var(--muted);font-size:16px;cursor:pointer;border-radius:6px;padding:2px 6px;} .sp-x:hover,.sp-x:focus-visible{color:var(--txt);outline:none;}
+    .sp-body{overflow:auto;padding:8px 12px 24px;}
+    .sp-body h4{font-size:11px;text-transform:uppercase;letter-spacing:0.6px;color:var(--muted);margin:16px 6px 8px;font-weight:600;}
+    .plan-q{margin:0 6px 14px;} .plan-qt{font-size:12.5px;color:var(--txt);font-weight:500;margin-bottom:6px;word-break:break-word;}
+    .plan-row{display:flex;flex-wrap:wrap;align-items:center;gap:6px;margin-bottom:6px;}
+    .plan-stage{font-size:10px;text-transform:uppercase;letter-spacing:0.5px;color:var(--purple);font-weight:600;}
+    .plan-drop{font-size:11px;color:var(--muted);margin:0 0 6px;} .plan-empty{font-size:12px;color:var(--muted);padding:6px;}
+    .rchip{display:inline-flex;align-items:center;gap:5px;font-size:11.5px;padding:3px 9px 3px 7px;border-radius:999px;background:rgba(255,255,255,0.05);border:1px solid var(--border);color:var(--sec);}
+    .rchip b{font-family:'Fira Code',monospace;font-size:10.5px;color:var(--green);font-weight:600;}
+    .rchip.warn b{color:#F59E0B;} .rchip.bad{border-color:rgba(239,68,68,0.35);} .rchip.bad b{color:var(--red);}
+    .router-live{margin-top:16px;padding-top:14px;border-top:1px solid var(--border);} .router-live:empty{display:none;}
+    .rl-title{font-size:11px;text-transform:uppercase;letter-spacing:0.6px;color:var(--muted);font-weight:600;margin-bottom:10px;}
+
     /* Progress card */
     .prog-card{width:100%;background:var(--card);border:1px solid var(--border);border-radius:16px;padding:22px;box-shadow:var(--sh);animation:pulseBorder 2s infinite alternate;}
     .prog-head{display:flex;align-items:center;gap:10px;margin-bottom:18px;border-bottom:1px solid var(--border);padding-bottom:12px;}
@@ -217,6 +264,10 @@
       .sidebar.active{margin-left:0;}
       .card-grid{grid-template-columns:1fr;}
       .src-grid{grid-template-columns:1fr;}
+      .sp{top:auto;left:0;width:100%;height:78vh;border-left:none;border-top:1px solid var(--border);border-radius:16px 16px 0 0;}
+    }
+    @media(max-width:480px){
+      .source-card{flex-wrap:wrap;} .source-card .avatar{display:none;} .source-badge{margin-left:34px;}
     }
   </style>
 </head>
@@ -388,7 +439,7 @@ renderer.code = function(code, lang){
 };
 marked.use({ renderer });
 window.cpCode = (uid,enc) => navigator.clipboard.writeText(decodeURIComponent(enc)).then(()=>toast('Copied','Code copied.',true)).catch(()=>toast('Failed','Could not copy.'));
-window.cpReport = uid => navigator.clipboard.writeText($(uid)?.innerText||'').then(()=>toast('Copied','Report copied.',true)).catch(()=>toast('Failed','Could not copy.'));
+window.cpReport = uid => navigator.clipboard.writeText($(uid)?.dataset.plain||$(uid)?.innerText||'').then(()=>toast('Copied','Report copied.',true)).catch(()=>toast('Failed','Could not copy.'));
 
 /* ==========================================================================
    HEALTH POLL
@@ -503,7 +554,7 @@ async function selectSession(id){
   hideLanding(true);
   queries.forEach(q=>{
     appendUser(q.question);
-    appendAI(q.answer,[],null,false);
+    appendAI(q.answer,[],null,false,{citations:q.citations||[],routing:q.routing||[]});
   });
   scrollBottom();
   if(window.innerWidth<=768) $('sidebar').classList.remove('active');
@@ -586,7 +637,7 @@ function appendUser(text){
 
 /* streaming=false → renders full markdown immediately (history)
    streaming=true  → returns {contentDiv} for token appending  */
-function appendAI(markdown, sources=[], cacheHit=null, streaming=false){
+function appendAI(markdown, sources=[], cacheHit=null, streaming=false, extra=null){
   hideLanding(true);
   const row=document.createElement('div'); row.className='msg-row ai';
   let cacheBadge='';
@@ -627,7 +678,11 @@ function appendAI(markdown, sources=[], cacheHit=null, streaming=false){
   if(!streaming){
     // Static render — history load — fill content and sources immediately
     contentDiv.innerHTML = marked.parse(markdown||'');
-    if(sources && sources.length) renderSourceCards(sourcesSlot, sources);
+    // Phase 6: sources and router plan saved with the answer (older answers have neither)
+    const cs=(extra&&extra.citations)||[], rt=(extra&&extra.routing)||[];
+    if(cs.length||rt.length) renderSourcesFooter(sourcesSlot, cs, rt);
+    else if(sources && sources.length) renderSourceCards(sourcesSlot, sources);
+    if(cs.length) decorateAnswer(contentDiv, cs, sourcesSlot);
     if(typeof Prism!=='undefined') Prism.highlightAllUnder(row);
   }
   return {contentDiv, sourcesSlot, row};
@@ -667,19 +722,202 @@ function renderSourceCards(slot, sources){
 }
 
 /* ==========================================================================
+   SOURCES & SOURCE-ROUTER DISPLAY (Phase 6)
+   Cited sources as chips + a "N sources" footer + a panel with the search plan.
+   Built-in symbols only: no favicon service and no request to any site.
+   All server text goes through textContent / esc(); URLs must be http(s).
+   ========================================================================== */
+const SRC_META={
+  official_docs:{label:'Official docs',color:'#22c55e',
+    svg:'<path d="M4 5.5A2.5 2.5 0 0 1 6.5 3H20v16H6.5A2.5 2.5 0 0 0 4 21.5z"/><path d="M4 5.5v16"/><path d="M9 8h7"/>'},
+  github:{label:'GitHub',color:'#a78bfa',
+    svg:'<circle cx="6" cy="5" r="2"/><circle cx="6" cy="19" r="2"/><circle cx="18" cy="9" r="2"/><path d="M6 7v10"/><path d="M18 11c0 4-6 3-12 6"/>'},
+  reddit:{label:'Reddit',color:'#fb923c',
+    svg:'<path d="M21 12a8 8 0 0 1-11.6 7.1L4 20l1.1-4.4A8 8 0 1 1 21 12z"/><circle cx="9" cy="12" r=".8"/><circle cx="15" cy="12" r=".8"/>'},
+  web:{label:'Web',color:'#38bdf8',
+    svg:'<circle cx="12" cy="12" r="9"/><path d="M3 12h18"/><path d="M12 3a14 14 0 0 1 0 18a14 14 0 0 1 0-18"/>'}
+};
+const srcMeta=t=>SRC_META[t]||SRC_META.web;
+function srcIcon(type,size=14){
+  const m=srcMeta(type);
+  return `<span class="sicon" style="color:${m.color}" role="img" aria-label="${esc(m.label)}" title="${esc(m.label)}"><svg width="${size}" height="${size}" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${m.svg}</svg></span>`;
+}
+function siteName(domain){
+  const p=String(domain||'').toLowerCase().replace(/^www\./,'').split('.').filter(Boolean);
+  if(p.length<=1) return p[0]||'source';
+  if(p.length>=3&&p[p.length-1].length===2&&['co','com','org','net','ac','gov','edu'].includes(p[p.length-2])) return p[p.length-3];
+  return p[p.length-2];
+}
+function avatar(domain,size=18){
+  const n=siteName(domain); let h=0; for(const c of n) h=(h*31+c.charCodeAt(0))%360;
+  return `<span class="avatar" style="width:${size}px;height:${size}px;background:hsl(${h} 55% 38%)" aria-hidden="true">${esc((n[0]||'?').toUpperCase())}</span>`;
+}
+function safeUrl(u){ try{const x=new URL(u); return (x.protocol==='https:'||x.protocol==='http:')?x.href:'#';}catch(e){return '#';} }
+
+/* -- sources panel: one card per citation, collapsible; [N] markers in the answer point at the cards -- */
+const knownType=t=>SRC_META[t]?t:'web';
+function sourceCard(c,uid){
+  const type=knownType(c.source_type);
+  const a=document.createElement('a'); a.className='source-card'; a.href=safeUrl(c.url); a.target='_blank'; a.rel='noopener noreferrer';
+  a.id=uid+'-source-'+c.index; a.dataset.index=c.index; a.dataset.sourceType=type;
+  a.innerHTML=`<span class="source-index">[${esc(c.index)}]</span>${avatar(c.domain,18)}<div class="source-info"><div class="source-title"></div><div class="source-domain"></div></div><span class="source-badge ${type}"></span>`;
+  a.querySelector('.source-title').textContent=c.title||c.domain||c.url||'Source';
+  a.querySelector('.source-domain').textContent=c.domain||'';
+  a.querySelector('.source-badge').textContent=srcMeta(type).label;
+  return a;
+}
+function setSourcesOpen(panel,open){
+  panel.querySelector('.sources-list').hidden=!open;
+  panel.querySelector('.sources-header').setAttribute('aria-expanded',String(open));
+  panel.querySelector('.sources-toggle').textContent=open?'▼':'▶';
+}
+function toggleSources(panel){ setSourcesOpen(panel,panel.querySelector('.sources-list').hidden); }
+function buildSourcesPanel(slot,citations){
+  const uid=slot.id||'src', panel=document.createElement('div'); panel.className='sources-panel';
+  const head=document.createElement('button'); head.type='button'; head.className='sources-header';
+  head.innerHTML='<span class="sources-icon" aria-hidden="true">📄</span><span class="sources-count"></span><span class="sources-toggle" aria-hidden="true"></span>';
+  head.querySelector('.sources-count').textContent='Sources ('+citations.length+')';
+  const list=document.createElement('div'); list.className='sources-list';
+  citations.forEach(c=>list.appendChild(sourceCard(c,uid)));
+  panel.appendChild(head); panel.appendChild(list);
+  head.addEventListener('click',()=>toggleSources(panel));
+  setSourcesOpen(panel,citations.length===1);   // one source: shown; several: collapsed until clicked
+  return panel;
+}
+/* click on a [N] marker: open this answer's panel, scroll to the card and flash it */
+function highlightSource(slot,index){
+  const panel=slot&&slot.querySelector('.sources-panel'), card=panel&&panel.querySelector('[data-index="'+index+'"]');
+  if(!card) return;
+  setSourcesOpen(panel,true);
+  if(card.scrollIntoView) card.scrollIntoView({behavior:'smooth',block:'center'});
+  card.classList.add('highlighted'); clearTimeout(card._flash);
+  card._flash=setTimeout(()=>card.classList.remove('highlighted'),2000);
+}
+function makeCiteRef(c,slot){
+  const s=document.createElement('sup'); s.className='citation-ref'; s.dataset.citation=c.index; s.dataset.sourceType=knownType(c.source_type);
+  s.textContent='['+c.index+']'; s.tabIndex=0; s.setAttribute('role','link');
+  const tip=(c.title||c.domain||'Source')+(c.domain&&c.title?' — '+c.domain:'');
+  s.title=tip; s.setAttribute('aria-label','Source '+c.index+': '+tip);
+  s.addEventListener('click',()=>highlightSource(slot,c.index));
+  s.addEventListener('keydown',e=>{ if(e.key==='Enter'||e.key===' '){e.preventDefault(); highlightSource(slot,c.index);} });
+  return s;
+}
+/* [N] in the answer text -> superscript markers (code, links and buttons are left alone;
+   a number with no matching citation stays as plain text) */
+function decorateAnswer(root,citations,slot){
+  if(!root||!citations||!citations.length) return;
+  const byIdx=new Map(citations.map(c=>[Number(c.index),c]));
+  root.dataset.plain=root.innerText;   // "Copy Report" keeps the [N] markers
+  const walker=document.createTreeWalker(root,NodeFilter.SHOW_TEXT,{acceptNode:n=>
+    n.parentElement&&n.parentElement.closest('pre,code,a,button')?NodeFilter.FILTER_REJECT
+    :(/\[\d{1,3}\]/.test(n.nodeValue)?NodeFilter.FILTER_ACCEPT:NodeFilter.FILTER_SKIP)});
+  const nodes=[]; while(walker.nextNode()) nodes.push(walker.currentNode);
+  for(const node of nodes){
+    const text=node.nodeValue, re=/\[(\d{1,3})\]/g;
+    const frag=document.createDocumentFragment(); let last=0, m, changed=false;
+    while((m=re.exec(text))){
+      const c=byIdx.get(Number(m[1])); if(!c) continue;
+      frag.appendChild(document.createTextNode(text.slice(last,m.index)));
+      frag.appendChild(makeCiteRef(c,slot));
+      last=m.index+m[0].length; changed=true;
+    }
+    if(changed){ frag.appendChild(document.createTextNode(text.slice(last))); node.parentNode.replaceChild(frag,node); }
+  }
+}
+
+/* -- the source router's plan: which sources each sub-question was sent to, and what came back -- */
+const STAGE_LABEL={search:'Search',gap_search:'Gap search',retry:'Retry'};
+const ORIGIN_LABEL={planner:'suggested by the planner',policy:'added by the router',fallback:'chosen by the routing rules'};
+const DROP_LABEL={non_technical:'not a technical question',over_cap:'over the per-question source limit',
+  unknown_source_type:'not a supported source',malformed_source:'not a supported source',unsupported_source_type:'not a supported source',
+  technology_not_in_registry:'no official docs registered for this technology',docs_disabled:'official docs are turned off',
+  router_disabled:'the source router is turned off',too_many_suggestions:'too many suggestions'};
+function routeChip(type,outcome,origin){
+  const m=srcMeta(type); let stat='', cls='';
+  if(outcome){
+    if(outcome.status==='ok') stat=String(outcome.result_count);
+    else if(outcome.status==='empty'){stat='0';cls=' warn';}
+    else if(outcome.status==='skipped'){stat='skipped';cls=' warn';}
+    else {stat=outcome.status==='timeout'?'timeout':'failed';cls=' bad';}
+  }
+  const tip=m.label+(origin?' - '+(ORIGIN_LABEL[origin]||origin):'')+(outcome?' - '+outcome.status+(outcome.error_code?' ('+outcome.error_code+')':''):'');
+  return `<span class="rchip${cls}" title="${esc(tip)}">${srcIcon(type,13)}<span>${esc(m.label)}</span>${stat?`<b>${esc(stat)}</b>`:''}</span>`;
+}
+function planHTML(routing,opts={}){
+  const groups=new Map();
+  (routing||[]).forEach(d=>{ if(!groups.has(d.task_id)) groups.set(d.task_id,{q:d.sub_question,items:[]}); groups.get(d.task_id).items.push(d); });
+  let html='';
+  groups.forEach(g=>{
+    html+=`<div class="plan-q"><div class="plan-qt">${esc(g.q)}</div>`;
+    g.items.forEach(d=>{
+      const out=new Map((d.outcomes||[]).map(o=>[o.source,o]));
+      const stage=d.stage&&d.stage!=='search'?`<span class="plan-stage">${esc(STAGE_LABEL[d.stage]||d.stage)}</span>`:'';
+      html+=`<div class="plan-row">${stage}${(d.sources||[]).map(s=>routeChip(s,out.get(s),(d.origins||{})[s])).join('')}</div>`;
+      if(!opts.compact&&(d.dropped||[]).length)
+        html+=`<div class="plan-drop">${d.dropped.map(x=>`Not used: ${esc(x.source)} - ${esc(DROP_LABEL[x.reason]||x.reason)}`).join(' &middot; ')}</div>`;
+    });
+    html+='</div>';
+  });
+  return html||'<div class="plan-empty">No routing information for this answer.</div>';
+}
+function renderRoutingLive(routing){
+  const el=$('routerLive'); if(!el) return;
+  el.innerHTML='<div class="rl-title">Source router</div>'+planHTML(routing,{compact:true});
+  scrollBottom();
+}
+
+/* -- under the answer: the sources panel, then a "Search plan" button (drawer) and the "Searched" line -- */
+let srcPanel=null;
+function closeSourcesPanel(){ if(srcPanel){srcPanel.remove(); srcPanel=null; document.removeEventListener('keydown',panelKey);} }
+function panelKey(e){ if(e.key==='Escape') closeSourcesPanel(); }
+function openPlanPanel(routing){
+  closeSourcesPanel();
+  const wrap=document.createElement('div'); wrap.className='sp-wrap';
+  wrap.innerHTML='<div class="sp-back"></div><aside class="sp" role="dialog" aria-label="Search plan"><header class="sp-head"><strong>Search plan</strong><button class="sp-x" type="button" aria-label="Close">&#10005;</button></header><div class="sp-body"></div></aside>';
+  const body=wrap.querySelector('.sp-body');
+  const h=document.createElement('h4'); h.textContent='Source router: what was searched for each sub-question'; body.appendChild(h);
+  const plan=document.createElement('div'); plan.innerHTML=planHTML(routing); body.appendChild(plan);
+  wrap.querySelector('.sp-x').addEventListener('click',closeSourcesPanel);
+  wrap.querySelector('.sp-back').addEventListener('click',closeSourcesPanel);
+  document.body.appendChild(wrap); srcPanel=wrap; document.addEventListener('keydown',panelKey);
+  wrap.querySelector('.sp-x').focus();
+}
+function renderSourcesFooter(slot,citations,routing){
+  if(!slot) return;
+  citations=citations||[]; routing=routing||[]; slot.innerHTML='';
+  if(!citations.length&&!routing.length) return;   // nothing to show: no panel at all
+  if(citations.length) slot.appendChild(buildSourcesPanel(slot,citations));
+  if(!routing.length) return;
+  const bar=document.createElement('div'); bar.className='src-footer';
+  const btn=document.createElement('button'); btn.type='button'; btn.className='src-btn'; btn.setAttribute('aria-haspopup','dialog');
+  btn.textContent='Search plan';
+  btn.addEventListener('click',()=>openPlanPanel(routing));
+  bar.appendChild(btn);
+  const used=[...new Set(routing.flatMap(d=>d.sources||[]))];
+  if(used.length){
+    const s=document.createElement('span'); s.className='searched';
+    s.innerHTML='<span>Searched</span>'+used.map(t=>`<span class="searched-i">${srcIcon(t,14)}${esc(srcMeta(t).label)}</span>`).join('');
+    bar.appendChild(s);
+  }
+  slot.appendChild(bar);
+}
+
+/* ==========================================================================
    PROGRESS STEPPER
    ========================================================================== */
 const NODE_STEP={
   semantic_cache_node:0, classify_node:0,
   planner_node:1, simple_search_node:1,
   search_node:2,
-  synthesize_node:3, save_to_cache_node:3
+  evidence_collection:3, gap_detection:3, targeted_search:3, synthesis_node:3, synthesize_node:3,
+  critic_node:4, retry_node:4, format_response:4, save_to_cache_node:4
 };
 const STEP_LABELS=[
   'Understanding query & checking cache',
-  'Planning research & generating sub-queries',
-  'Running parallel Tavily web searches',
-  'Synthesizing answer with LLM',
+  'Planning research & choosing sources',
+  'Searching the selected sources',
+  'Collecting evidence & writing a cited answer',
+  'Reviewing the answer & preparing citations',
 ];
 
 function createProgCard(){
@@ -696,7 +934,7 @@ function createProgCard(){
         </div>
         <span class="pstat ${i===0?'running':'pending'}" id="pst${i}">${i===0?'Executing':'Pending'}</span>
       </div>`).join('')}
-    </div>`;
+    </div><div class="router-live" id="routerLive"></div>`;
   chatInner.appendChild(card); scrollBottom();
 }
 
@@ -753,6 +991,7 @@ async function doSearch(){
   if(sessionIsNew){ await autoRenameSession(activeSessionId,question); sessionIsNew=false; }
 
   let rawText='', lastStep=-1;
+  let citations=[], routing=[], legacySources=[];   // Phase 6: filled by the citations / routing events
   try{
     const res=await fetch('/api/research/stream',{
       method:'POST',
@@ -807,11 +1046,19 @@ async function doSearch(){
             scrollBottom();
           }
         }
+        else if(data.type==='routing'){
+          // Which sources the router searched for each sub-question, as each search finishes
+          routing=routing.concat(data.decisions||[]);
+          renderRoutingLive(routing);
+        }
+        else if(data.type==='citations'){
+          citations=data.citations||[];
+        }
         else if(data.type==='sources'){
-          // Inject source cards into the slot below the answer
-          console.log('[UI] Rendering', data.sources?.length || 0, 'sources');
-          renderSourceCards(sourcesSlot, data.sources);
-          scrollBottom();
+          // Sent once, after the tokens: the full numbered citations (+ the legacy list, used as the
+          // fallback at 'done' only when the answer came without citations)
+          if(Array.isArray(data.citations)&&data.citations.length) citations=data.citations;
+          legacySources=data.sources||[];
         }
         else if(data.type==='done'){
           $('progCard')?.remove(); 
@@ -826,6 +1073,10 @@ async function doSearch(){
             console.log('[UI] WARNING: Empty rawText on cache hit');
           }
           if(typeof Prism!=='undefined') Prism.highlightAllUnder(row);
+          // Phase 6: cited sources as chips + footer + panel; the older source cards when there are none
+          if(citations.length||routing.length) renderSourcesFooter(sourcesSlot, citations, routing);
+          else if(legacySources.length) renderSourceCards(sourcesSlot, legacySources);
+          if(citations.length) decorateAnswer(contentDiv, citations, sourcesSlot);
           scrollBottom();
         }
       }
