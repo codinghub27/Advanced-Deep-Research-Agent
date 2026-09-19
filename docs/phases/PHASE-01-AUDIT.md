@@ -96,7 +96,7 @@ None. No pytest, no test files, no CI.
 ## Planned Changes
 Phase 1 made no code changes. Only this document was edited.
 
-Recommended before Phase 2, as separate small commits (**not started**; awaiting the go-ahead):
+Recommended before Phase 2 (**implemented, not yet committed; see "Pre-Phase-2 Hardening" below**):
 1. Admin-role check on `/admin/*`; ownership checks on `GET`/`PATCH /api/sessions/{id}` and on `session_id` in `/api/research*`.
 2. Fix `default=datetime.utcnow()` → `default=datetime.utcnow` (`models.py:26,49,84`).
 3. Add minimal `logging.basicConfig` (app `logger.info` output is currently invisible).
@@ -231,6 +231,37 @@ Ordered by severity:
 - **Performance:** sync SQLAlchemy inside `async def` routes blocks the event loop; the 20-query history is loaded every request and unused; `ChatGroq(timeout=None)`; up to 3–4 serial LLM calls per request; O(n) cache scan; no global concurrency limit across requests.
 - **Ops/hygiene:** logging never configured; no tests; unpinned/incorrect `requirements.txt`; 23 `.pyc`/`.idea` files still tracked; venv is Python 3.14 while tracked bytecode is 3.11; `start_all.ps1` and `register_user.py` use stale paths/imports; `docker-compose.yml` runs only Qdrant with an unpinned `latest` tag and a `curl` healthcheck that the image may not support (unverified).
 - **Not verified:** live end-to-end behavior of any endpoint.
+
+## Pre-Phase-2 Hardening
+Status: implemented and verified; **awaiting the user's approval of the diff before commit**. Not Phase 2 work.
+
+| # | Change | Files |
+|---|---|---|
+| 1 | Ownership: new `get_user_session()`; used by `GET`/`PATCH /api/sessions/{id}` and the `session_id` lookup in `/api/research*`. Another user's or missing session returns **404** (same as the existing `DELETE`). Admin: new `require_admin` dependency on `/admin/*` returns **403** unless the caller is in `ADMIN_USERNAMES` (comma-separated). **Unset = nobody is admin.** | `db/crud.py`, `auth/auth.py`, `main.py` |
+| 2 | `datetime.utcnow()` removed. JWT expiry uses `datetime.now(timezone.utc)`. Models use `default=_utc_now` (a callable; the old `utcnow()` ran once at import). `_utc_now()` reads the aware UTC clock and strips tzinfo so values stay naive UTC in the existing `timestamp without time zone` columns (no schema change, no PostgreSQL session-timezone shift). | `db/models.py`, `auth/auth.py` |
+| 3 | `configure_logging()` (root `basicConfig`, `LOG_LEVEL`, default INFO; `httpx`/`httpcore` pinned to WARNING). Called once from the `startup` handler, not at import; idempotent. | new `logging_config.py`, `main.py` |
+| 4 | `requirements.txt`: removed `typing`, duplicate `langchain-openai`, and unused `passlib`, `wikipedia`, `langchain-ollama`, `langchain-google-genai`, `openai`, `langchain-community`, `langsmith`. `dotenv` became `python-dotenv`; `python-jose[cryptogaphy]` typo became `[cryptography]`; added `bcrypt` (imported directly). No version changes. New `.env.example` (names and placeholders only). | `requirements.txt`, `.env.example` |
+| 5 | `git rm --cached` on the 23 `.pyc`/`.idea` files (files remain on disk). Repaired `.gitignore`: a UTF-16 fragment with NUL bytes had been appended, corrupting the `local_settings.py` line. Added `.env.*` + `!.env.example` and `.pytest_cache/`. No history rewrite. | `.gitignore` |
+
+**Kept on purpose:** `langchain-openrouter` (imported by `llms.py:2`, so removing it breaks startup), `qdrant-client`, `langchain-qdrant`, `alembic`, `psycopg[binary]` (planned phases / PostgreSQL), `python-multipart` (unused but not clearly removable). `langsmith` is still installed transitively via `langchain-core`.
+
+**Tests added** (stdlib `unittest`, no new dependency): `tests/test_ownership.py` (17), `tests/test_datetime.py` (4). Run: `python -m unittest discover -s tests -t .` from the repo root. The tests force dummy env vars, use in-memory SQLite, and fake the graph, so they make no LLM, Tavily or network calls and never touch a real database.
+
+**Results**
+- 21/21 tests pass in `.venv`, and again in an isolated install of the cleaned `requirements.txt` (Python 3.14.0).
+- Mutation check: with the old `main.py` restored, 7 ownership/admin tests fail; with the fix, all pass.
+- Import smoke: 16 application routes and the same 7 graph nodes as the Phase 1 baseline.
+- Logging: 3 `configure_logging()` calls leave exactly 1 root handler.
+- `.env` is gitignored and untracked, and was never in any commit. No `.env` value appears in any new or changed file. 0 tracked `.pyc`/`.idea` files remain.
+- Not run: any live endpoint, LLM, Tavily or PostgreSQL call.
+
+**Remaining issues (not addressed here)**
+- **`.env` has `LANGSMITH_TRACING` enabled.** `load_dotenv()` exports it, and LangChain honours it, so run data may be sent to LangSmith. That conflicts with CLAUDE.md. Turn it off in `.env`. It is intentionally absent from `.env.example`.
+- The `.env` on the audit machine points `DATABASE_URL` at SQLite, while the user runs PostgreSQL. The PostgreSQL path has not been tested.
+- Register the admin account **before** setting `ADMIN_USERNAMES`; otherwise anyone could register that username first.
+- Existing rows written before this fix keep the server-start timestamp; they are not corrected.
+- `clear_all_data`'s `except Exception` converts its own HTTP 404 into a 500 (pre-existing, untouched).
+- `/test-db` is still unauthenticated and leaks exception text; `PATCH` still accepts any dict body; login still enumerates users. All are Phase 14 material.
 
 ## Git Commit
 `phase-1: repository audit and baseline` (hash omitted on purpose; history was rewritten, see `git log`).
