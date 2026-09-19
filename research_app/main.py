@@ -11,12 +11,13 @@ from research_app.db.database import engine, get_db, Base
 from research_app.db.crud import (
     hash_password, verify_password, get_or_create_session, get_history,
     get_user_by_username, create_user, save_query, create_session,
-    get_sessions, get_session_queries
+    get_sessions, get_session_queries, get_user_session
 )
-from research_app.auth.auth import get_curr_user, create_access_token
+from research_app.auth.auth import get_curr_user, create_access_token, require_admin
 from research_app.schemas.schemas import RequestRegister, RequestResearch, NODE_LABELS
 from research_app.agent.graph import compiled_graph
 from research_app.db.models import Session as ChatSession, User, Query
+from research_app.logging_config import configure_logging
 
 logger = logging.getLogger(__name__)
 
@@ -36,6 +37,7 @@ app.add_middleware(
 @app.on_event("startup")
 def startup():
     """Create all tables on startup"""
+    configure_logging()
     Base.metadata.create_all(bind=engine)
     logger.info("Database tables created")
 
@@ -76,7 +78,7 @@ async def chat_ui():
 # ── Admin Endpoints ──────────────────────────────────────────────────────────
 
 @app.delete("/admin/clear-all-data")
-def clear_all_data(user: str = Depends(get_curr_user), db: DBSession = Depends(get_db)):
+def clear_all_data(user: str = Depends(require_admin), db: DBSession = Depends(get_db)):
     """
     Clear all questions, answers, and sessions from database.
     WARNING: This operation cannot be undone!
@@ -109,7 +111,7 @@ def clear_all_data(user: str = Depends(get_curr_user), db: DBSession = Depends(g
 
 
 @app.get("/admin/db-stats")
-def get_db_stats(user: str = Depends(get_curr_user), db: DBSession = Depends(get_db)):
+def get_db_stats(user: str = Depends(require_admin), db: DBSession = Depends(get_db)):
     """Check current database record counts"""
     try:
         queries_count = db.query(Query).count()
@@ -181,7 +183,7 @@ async def research(
 
     # Get or create session
     if request.session_id:
-        session = db.query(ChatSession).filter(ChatSession.id == request.session_id).first()
+        session = get_user_session(request.session_id, db_user.id, db)
     else:
         session = db.query(ChatSession).filter(
             ChatSession.user_id == db_user.id
@@ -242,7 +244,7 @@ async def research_stream(
 
     # Get or create session
     if request.session_id:
-        session = db.query(ChatSession).filter(ChatSession.id == request.session_id).first()
+        session = get_user_session(request.session_id, db_user.id, db)
     else:
         session = db.query(ChatSession).filter(
             ChatSession.user_id == db_user.id
@@ -423,6 +425,13 @@ def get_session_queries_(
         db: DBSession = Depends(get_db)
 ):
     """Get all queries in a session"""
+    db_user = get_user_by_username(user, db)
+    if not db_user:
+        raise HTTPException(status_code=404, detail="User not found")
+
+    if not get_user_session(session_id, db_user.id, db):
+        raise HTTPException(status_code=404, detail="Session not found")
+
     queries = get_session_queries(session_id, db)
     return {
         "queries": [
@@ -444,7 +453,11 @@ def rename_session_(
         db: DBSession = Depends(get_db)
 ):
     """Rename a session"""
-    session = db.query(ChatSession).filter(ChatSession.id == session_id).first()
+    db_user = get_user_by_username(user, db)
+    if not db_user:
+        raise HTTPException(status_code=404, detail="User not found")
+
+    session = get_user_session(session_id, db_user.id, db)
     if not session:
         raise HTTPException(status_code=404, detail="Session not found")
 

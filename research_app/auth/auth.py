@@ -1,7 +1,7 @@
 from jose import jwt,JWTError
 from fastapi import Depends,HTTPException,status
 from fastapi.security import OAuth2PasswordBearer
-from datetime import datetime,timedelta
+from datetime import datetime,timedelta,timezone
 from dotenv import load_dotenv
 import os
 
@@ -15,7 +15,7 @@ ALGORITHM=os.getenv('ALGORITHM','HS256')
 
 def create_access_token(data:dict)->str:
     payload=data.copy()
-    expire=datetime.utcnow()+timedelta(minutes=30)
+    expire=datetime.now(timezone.utc)+timedelta(minutes=30)
     payload['exp']=expire
     token=jwt.encode(
         payload,
@@ -45,3 +45,15 @@ def get_curr_user(token:str=Depends(oauth2_scheme)):
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Invalid token"
         )
+
+
+def require_admin(user:str=Depends(get_curr_user))->str:
+    # Admins are listed in ADMIN_USERNAMES (comma-separated). Unset/empty means
+    # nobody is an admin, so /admin/* fails closed.
+    admins={u.strip() for u in os.getenv('ADMIN_USERNAMES','').split(',') if u.strip()}
+    if user not in admins:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Admin privileges required"
+        )
+    return user

@@ -139,6 +139,17 @@ def get_sessions(user_id: int, db: Session):
     )
 
 
+def get_user_session(session_id: int, user_id: int, db: Session):
+    """
+    Return the session only if it belongs to the given user, else None.
+    """
+    return (
+        db.query(ChatSession)
+        .filter(ChatSession.id == session_id, ChatSession.user_id == user_id)
+        .first()
+    )
+
+
 
 # ============================================================
 # QUERY FUNCTIONS

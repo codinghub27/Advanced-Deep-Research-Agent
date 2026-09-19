@@ -2,9 +2,14 @@ from sqlalchemy.orm import Mapped, mapped_column, relationship
 from sqlalchemy import (
 Integer,String,DateTime,ForeignKey,JSON
 )
-from datetime import datetime
+from datetime import datetime, timezone
 
 from research_app.db.database import Base
+
+def _utc_now() -> datetime:
+    # Timezone-aware UTC clock, stored as naive UTC to match the existing
+    # 'timestamp without time zone' columns (same values utcnow() produced).
+    return datetime.now(timezone.utc).replace(tzinfo=None)
 
 class User(Base):
     __tablename__ = "users"
@@ -23,7 +28,7 @@ class User(Base):
     )
     created_at:Mapped[datetime]=mapped_column(
         DateTime,
-        default=datetime.utcnow(),
+        default=_utc_now,
     )
     sessions=relationship(
         "Session",
@@ -46,7 +51,7 @@ class Session(Base):
     )
     created_at:Mapped[datetime]=mapped_column(
         DateTime,
-        default=datetime.utcnow(),
+        default=_utc_now,
     )
     user=relationship(
         "User",
@@ -81,7 +86,7 @@ class Query(Base):
     )
     created_at:Mapped[datetime]=mapped_column(
     DateTime,
-        default=datetime.utcnow()
+        default=_utc_now
     )
     session=relationship(
         "Session",
