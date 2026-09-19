@@ -233,7 +233,7 @@ Ordered by severity:
 - **Not verified:** live end-to-end behavior of any endpoint.
 
 ## Pre-Phase-2 Hardening
-Status: implemented and verified; **awaiting the user's approval of the diff before commit**. Not Phase 2 work.
+Status: implemented, verified and committed as `0f7f8a1` (its own commit, before Phase 2). Not Phase 2 work.
 
 | # | Change | Files |
 |---|---|---|
