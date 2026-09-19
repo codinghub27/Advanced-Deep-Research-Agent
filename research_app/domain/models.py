@@ -167,6 +167,10 @@ class SourceDocument(DomainModel):
     author: Optional[str] = None
     published_at: Optional[UtcDatetime] = None
     retrieved_at: UtcDatetime = Field(default_factory=utc_now)
+    # Provenance (Phase 3): who returned this and the URL exactly as they returned it.
+    # ``source_type``, ``query``/``task_id`` and ``retrieved_at`` cover the rest.
+    provider: Optional[str] = None  # e.g. "tavily"
+    original_url: Optional[str] = None  # before normalisation; not validated
     snippet: Optional[str] = None
     content: Optional[str] = None
     technology: Optional[str] = None

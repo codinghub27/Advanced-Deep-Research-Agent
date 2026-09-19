@@ -10,6 +10,8 @@ from langgraph.types import Send
 from research_app.agent.vectordb import lookup_cache, store_cache
 from langgraph.graph import END
 from research_app.agent.llms import llm_groq
+from research_app.domain.legacy import search_result_entry, source_to_legacy
+from research_app.sources import normalize_tavily_response
 
 logger = logging.getLogger(__name__)
 
@@ -50,6 +52,7 @@ class ResearchState(TypedDict):
     sources: Annotated[list, operator.add]
     sub_questions: list
     search_results: Annotated[list, operator.add]
+    source_documents: Annotated[list, operator.add]  # normalized SourceDocument objects (Phase 3)
     cache_hit: bool
     api_limit_reached: bool
     critic_score: int
@@ -123,28 +126,30 @@ COMPLEX: needs research (e.g., "best laptops 2026?")"""
 def classify_router(state: ResearchState):
     return "simple_search_node" if state["is_simple"] else "planner_node"
 
+MAX_WEB_RESULTS = 3  # same cap as TavilySearch(max_results=3) above
+
+
+def _web_search_update(query: str, response, *, content_limit: int) -> dict:
+    """Normalize a Tavily response, then project it onto the state keys the rest
+    of the graph (and the SSE ``sources`` event) already consume."""
+    result = normalize_tavily_response(response, query=query, max_results=MAX_WEB_RESULTS)
+    if result.error:
+        logger.warning("Web search for '%s' returned no usable results: %s",
+                       query[:70], result.error.code)
+    docs = result.documents
+    return {
+        "search_results": [search_result_entry(query, docs, content_limit=content_limit)],
+        "sources": [source_to_legacy(d) for d in docs],
+        "source_documents": docs,
+    }
+
 async def simple_search_node(state: ResearchState):
     """Single search for simple questions."""
     query = state["question"]
     results = await tavily_tool.ainvoke({"query": query})
-    
-    condensed = []
-    sources = []
-    result_list = results.get("results", []) if isinstance(results, dict) else []
-    for r in result_list[:3]:
-        content = r.get("content", "")[:400]
-        url = r.get("url", "")
-        title = r.get("title", "")
-        if content:
-            condensed.append(f"{url}\n{content}")
-        if url:
-            sources.append({"url": url, "title": title, "snippet": content[:150]})
-    
-    return {
-        "search_results": [f"Query: {query}\n" + "\n---\n".join(condensed)],
-        "sub_questions": [query],
-        "sources": sources,
-    }
+    update = _web_search_update(query, results, content_limit=400)
+    update["sub_questions"] = [query]
+    return update
 
 async def planner_node(state: ResearchState):
     """Generate 3 search queries for complex questions."""
@@ -174,23 +179,7 @@ async def search_node(state: dict):
     """Run web search for a query."""
     query = state["query"]
     results = await tavily_tool.ainvoke({"query": query})
-    
-    condensed = []
-    sources = []
-    result_list = results.get("results", []) if isinstance(results, dict) else []
-    for r in result_list[:3]:
-        content = r.get("content", "")[:800]
-        url = r.get("url", "")
-        title = r.get("title", "")
-        if content:
-            condensed.append(f"{url}\n{content}")
-        if url:
-            sources.append({"url": url, "title": title, "snippet": content[:150]})
-    
-    return {
-        "search_results": [f"Query: {query}\n" + "\n---\n".join(condensed)],
-        "sources": sources,
-    }
+    return _web_search_update(query, results, content_limit=800)
 
 async def synthesize_node(state: ResearchState):
     """Generate final answer from search results."""

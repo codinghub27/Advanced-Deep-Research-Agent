@@ -6,10 +6,12 @@ Only structures that exist in the running app are translated:
 - ``sub_questions``
 - a final ``ResearchState`` snapshot -> ``ResearchRun``
 
-Deliberately NOT here (Phase 3): parsing Tavily payloads or the
-``"Query: ...\\nurl\\ncontent"`` strings held in ``search_results``.
+Also (Phase 3): ``search_result_entry`` renders ``SourceDocument``s as the
+``"Query: ...\\nurl\\ncontent"`` string held in ``search_results``. Tavily payloads
+are parsed in ``research_app/sources``, not here, and ``search_results`` strings are
+never parsed back.
 
-Nothing in the running app imports this module yet.
+Used at runtime by the two search nodes in ``agent/state.py``.
 """
 from __future__ import annotations
 
@@ -61,6 +63,17 @@ def source_from_legacy(
 def source_to_legacy(doc: SourceDocument) -> dict[str, str]:
     """``SourceDocument`` -> the exact three-key dict the SSE ``sources`` event carries."""
     return {"url": doc.url, "title": doc.title or "", "snippet": doc.snippet or ""}
+
+
+def search_result_entry(
+    query: str, docs: Iterable[SourceDocument], *, content_limit: int
+) -> str:
+    """The single ``search_results`` string a search node emits:
+    ``Query: <q>\\n<url>\\n<content>`` blocks joined by ``\\n---\\n``. Content is cut
+    to ``content_limit`` characters; documents without content are left out, as
+    they always were."""
+    condensed = [f"{d.url}\n{d.content[:content_limit]}" for d in docs if d.content]
+    return f"Query: {query}\n" + "\n---\n".join(condensed)
 
 
 def sources_from_legacy(

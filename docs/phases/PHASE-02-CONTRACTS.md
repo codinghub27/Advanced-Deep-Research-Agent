@@ -55,6 +55,7 @@ Also: `ResearchError`, `SourceCredibility`, `Gap`, `CriticIssue`, `HistoryTurn`;
 
 ## Architecture Decisions
 - **Additive, not wired.** Nothing in the running app imports `research_app.domain`. Phase 3 does the first wiring, converting at node boundaries via `legacy.py`. `ResearchState` stays the graph contract.
+  - *Update (Phase 3):* now wired. The two web search nodes in `agent/state.py` import `domain.legacy`; `SourceDocument` gained `provider` and `original_url`. See `PHASE-03-SOURCE-NORMALIZATION.md`.
 - **Domain package is self-contained.** It may not import `research_app.agent/db/main/auth` or LangChain/LangGraph/SQLAlchemy/FastAPI (`state.py` builds a Tavily client at import). Enforced by a subprocess test.
 - **Interfaces: only two.** `SourceAdapter` (adapters return a failed `ResearchResult` instead of raising) and `AnswerCache` (mirrors today's `lookup_cache`/`store_cache`; Phase 12 widens it). Critic, gap-detector and evidence-store interfaces wait for Phases 8, 9, 11.
 - **`GapAnalysis` folds unsupported claims and contradictions into `gaps`** (by `GapKind`) rather than separate lists.
