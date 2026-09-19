@@ -53,10 +53,12 @@ class DomainIsolationTests(unittest.TestCase):
         self.assertEqual(out.stdout.strip(), "", f"domain imported: {out.stdout.strip()}")
 
     def test_sources_packages_pull_in_no_app_or_framework_modules(self):
-        # Phase 4: the official-docs package (registry, detector, adapter) must stay
-        # importable without LangChain/LangGraph/agent code, like the rest of sources/.
+        # Phase 4/5: the official-docs and routing packages (registry, detector, adapters,
+        # router) must stay importable without LangChain/LangGraph/agent code, like the
+        # rest of sources/.
         code = (
-            "import sys, research_app.sources, research_app.sources.official_docs\n"
+            "import sys, research_app.sources, research_app.sources.official_docs, "
+            "research_app.sources.routing\n"
             "bad = sorted(m for m in sys.modules if m.split('.')[0] in "
             "{'langgraph','langchain_core','langchain','langchain_groq','langchain_tavily',"
             "'qdrant_client','sqlalchemy','fastapi'} "

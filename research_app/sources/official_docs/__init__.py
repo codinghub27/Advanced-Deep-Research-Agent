@@ -12,7 +12,7 @@ from research_app.sources.official_docs.adapter import (
     OfficialDocsAdapter,
     build_docs_request,
 )
-from research_app.sources.official_docs.detector import DocsIntent, detect_docs_intent
+from research_app.sources.official_docs.detector import DocsIntent, detect_docs_intent, mentioned_technologies
 from research_app.sources.official_docs.plan import DocsPlan, plan_official_docs
 from research_app.sources.official_docs.priority import authority_rank, is_official, prioritize
 from research_app.sources.official_docs.registry import (
@@ -29,6 +29,7 @@ from research_app.sources.official_docs.settings import DocsSettings
 __all__ = [
     "DEFAULT_MAX_RESULTS", "DocsEntry", "DocsIntent", "DocsMatch", "DocsPlan", "DocsRegistry",
     "DocsSettings", "DocsSite", "OfficialDocsAdapter", "authority_rank", "build_docs_request",
-    "detect_docs_intent", "get_registry", "is_official", "load_entries", "merge_entries",
+    "detect_docs_intent", "get_registry", "is_official", "load_entries", "mentioned_technologies",
+    "merge_entries",
     "plan_official_docs", "prioritize",
 ]

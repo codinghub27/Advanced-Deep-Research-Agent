@@ -15,6 +15,10 @@ Phase 4 adds ``official_docs_entries`` (one labelled ``search_results`` entry pe
 official-documentation document), ``is_official_docs_entry`` and
 ``prioritize_search_results`` (official entries first, for the synthesis prompt).
 
+Phase 5 adds ``community_entries`` (labelled ``[GITHUB: ...]`` / ``[REDDIT: ...]`` entries),
+the ``[WEB]`` label (an optional argument of ``search_result_entry``), ``entry_kind`` and
+``select_search_results`` (which entries the synthesis prompt reads).
+
 Used at runtime by the two search nodes and the synthesis step in ``agent/state.py``.
 """
 from __future__ import annotations
@@ -69,15 +73,20 @@ def source_to_legacy(doc: SourceDocument) -> dict[str, str]:
     return {"url": doc.url, "title": doc.title or "", "snippet": doc.snippet or ""}
 
 
+WEB_LABEL = "[WEB]"
+
+
 def search_result_entry(
-    query: str, docs: Iterable[SourceDocument], *, content_limit: int
+    query: str, docs: Iterable[SourceDocument], *, content_limit: int, label: Optional[str] = None
 ) -> str:
     """The single ``search_results`` string a search node emits:
     ``Query: <q>\\n<url>\\n<content>`` blocks joined by ``\\n---\\n``. Content is cut
     to ``content_limit`` characters; documents without content are left out, as
-    they always were."""
+    they always were. ``label`` (Phase 5: ``WEB_LABEL``) goes on its own line after the
+    query line; without it the output is exactly what it always was."""
     condensed = [f"{d.url}\n{d.content[:content_limit]}" for d in docs if d.content]
-    return f"Query: {query}\n" + "\n---\n".join(condensed)
+    head = f"Query: {query}\n" + (f"{label}\n" if label else "")
+    return head + "\n---\n".join(condensed)
 
 
 OFFICIAL_DOCS_LABEL = "[OFFICIAL DOCUMENTATION"
@@ -125,6 +134,99 @@ def prioritize_search_results(entries: Iterable[str]) -> list[str]:
     return [e for e in entries if is_official_docs_entry(e)] + [
         e for e in entries if not is_official_docs_entry(e)
     ]
+
+
+GITHUB_LABEL = "[GITHUB"
+REDDIT_LABEL = "[REDDIT"
+
+_GITHUB_NUMBERED = {"issue": "issue", "pull_request": "pull request", "discussion": "discussion"}
+
+
+def _meta(doc: SourceDocument, key: str) -> Mapping[str, Any]:
+    value = doc.metadata.get(key)
+    return value if isinstance(value, Mapping) else {}
+
+
+def _community_label(doc: SourceDocument) -> Optional[str]:
+    """``[GITHUB: owner/repo, issue #12]`` / ``[REDDIT: r/sub]``. Built only from the
+    URL-derived, pattern-validated metadata the adapters attach, never from result text,
+    so page content cannot forge a label."""
+    if doc.source_type == SourceType.GITHUB:
+        meta = _meta(doc, "github")
+        name = "/".join(str(meta[k]) for k in ("owner", "repo") if meta.get(k))
+        kind = _GITHUB_NUMBERED.get(meta.get("kind"))
+        detail = f", {kind} #{meta['number']}" if kind and isinstance(meta.get("number"), int) else ""
+        return f"{GITHUB_LABEL}: {name}{detail}]" if name else f"{GITHUB_LABEL}]"
+    if doc.source_type == SourceType.REDDIT:
+        sub = _meta(doc, "reddit").get("subreddit")
+        return f"{REDDIT_LABEL}: r/{sub}]" if sub else f"{REDDIT_LABEL}]"
+    return None
+
+
+def community_entries(
+    query: str,
+    docs: Iterable[SourceDocument],
+    *,
+    content_limit: int = 1000,
+    entry_limit: int = SEARCH_ENTRY_MAX_CHARS,
+) -> list[str]:
+    """One ``search_results`` entry per GitHub/Reddit document::
+
+        Query: <q>
+        [GITHUB: owner/repo, issue #12]      (or [REDDIT: r/subreddit])
+        <url>
+        <content>
+
+    The second line is the label (``entry_kind``). Each entry is at most ``entry_limit``
+    characters, so the header is never sacrificed to a long body. Documents of other types
+    and documents without content are left out."""
+    query_line = " ".join(str(query).split())[:200]  # one line: the label must stay on line 2
+    entries: list[str] = []
+    for doc in docs:
+        label = _community_label(doc)
+        if label is None or not doc.content:
+            continue
+        head = f"Query: {query_line}\n{label}\n{doc.url}\n"
+        budget = max(0, min(content_limit, entry_limit - len(head)))
+        entries.append(head + doc.content[:budget])
+    return entries
+
+
+def entry_kind(entry: str) -> str:
+    """``official`` | ``github`` | ``reddit`` | ``web``, from the entry's second line."""
+    lines = entry.split("\n", 2)
+    second = lines[1] if len(lines) > 1 else ""
+    if second.startswith(OFFICIAL_DOCS_LABEL):
+        return "official"
+    if second.startswith(GITHUB_LABEL):
+        return "github"
+    if second.startswith(REDDIT_LABEL):
+        return "reddit"
+    return "web"
+
+
+def select_search_results(entries: Iterable[str], limit: int) -> list[str]:
+    """The entries the synthesis prompt reads (at most ``limit``).
+
+    Official documentation first, everything else in order (``prioritize_search_results``).
+    When there are more than ``limit`` entries AND GitHub/Reddit entries are among them, the
+    limit is shared round-robin between official / github / reddit / web, so a source the
+    router selected is not silently cut off by the entry cap. Without GitHub/Reddit entries
+    this is exactly ``prioritize_search_results(entries)[:limit]`` (Phase 4 behaviour)."""
+    ordered = prioritize_search_results(entries)
+    if len(ordered) <= limit:
+        return ordered
+    groups: dict[str, list[str]] = {"official": [], "github": [], "reddit": [], "web": []}
+    for entry in ordered:
+        groups[entry_kind(entry)].append(entry)
+    if not (groups["github"] or groups["reddit"]):
+        return ordered[:limit]
+    selected: list[str] = []
+    for position in range(max(len(g) for g in groups.values())):
+        for group in groups.values():
+            if position < len(group) and len(selected) < limit:
+                selected.append(group[position])
+    return selected
 
 
 def sources_from_legacy(

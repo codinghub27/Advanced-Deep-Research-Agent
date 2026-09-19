@@ -1,7 +1,8 @@
 """Source normalisation (Phase 3): raw provider results -> ``SourceDocument``.
 
 Official documentation (Phase 4) lives in the ``research_app.sources.official_docs``
-subpackage; import it explicitly (it is not re-exported here)."""
+subpackage, and the source router with the GitHub/Reddit adapters (Phase 5) in
+``research_app.sources.routing``; import them explicitly (they are not re-exported here)."""
 from research_app.sources.normalizer import (
     SNIPPET_MAX_CHARS,
     NormalizationError,

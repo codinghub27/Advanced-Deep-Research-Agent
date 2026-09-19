@@ -13,13 +13,25 @@ from langgraph.graph import END
 from research_app.agent.llms import llm_groq
 from research_app.domain import SourceType
 from research_app.domain.legacy import (
+    WEB_LABEL,
+    community_entries,
+    is_official_docs_entry,
     official_docs_entries,
-    prioritize_search_results,
     search_result_entry,
+    select_search_results,
     source_to_legacy,
 )
 from research_app.sources import normalize_tavily_response
 from research_app.sources.official_docs import OfficialDocsAdapter, plan_official_docs, prioritize
+from research_app.sources.routing import (
+    WEB_ONLY,
+    RouterSettings,
+    adapter_for,
+    build_request,
+    plan_technology_docs,
+    route_sources,
+    run_adapters,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -199,21 +211,112 @@ def _add_official_docs(update: dict, docs_result, query: str) -> dict:
         return update
 
 
+COMMUNITY_CONTENT_LIMIT = 1000  # per GitHub/Reddit document; the entry is also capped at 1500 characters
+
+
+def _route_for(text: str):
+    """The source route for ``text`` (Phase 5). Never raises: if routing fails the question
+    is researched with web (plus the Phase 4 documentation check) only."""
+    try:
+        return route_sources(text)
+    except Exception as exc:
+        logger.warning("Source routing failed (%s); using web search only", type(exc).__name__)
+        return WEB_ONLY
+
+
+def _plan_technology_docs_search(question: str, query: str):
+    """Official-docs plan for a problem/troubleshooting question that names a registered
+    technology, or None. Never raises."""
+    try:
+        return plan_technology_docs(question, query)
+    except Exception as exc:
+        logger.warning("Technology documentation planning failed (%s); skipping official docs", type(exc).__name__)
+        return None
+
+
+def _community_jobs(route, query: str) -> list:
+    """(adapter, request) for each of GitHub/Reddit that the route selected. Never raises."""
+    jobs = []
+    try:
+        timeout_s = RouterSettings.from_env().timeout_s
+        for source_type in (SourceType.GITHUB, SourceType.REDDIT):
+            if route.includes(source_type):
+                request = build_request(source_type, query, timeout_s=timeout_s)
+                if request is not None:
+                    jobs.append((adapter_for(source_type, _tavily_search), request))
+    except Exception as exc:
+        logger.warning("Could not prepare GitHub/Reddit searches (%s); continuing without them", type(exc).__name__)
+    return jobs
+
+
+async def _community_results(task) -> list:
+    """Results of the GitHub/Reddit task; ``run_adapters`` isolates source failures and
+    this guards the rest."""
+    try:
+        return await task
+    except Exception as exc:
+        logger.warning("GitHub/Reddit search crashed (%s); continuing without them", type(exc).__name__)
+        return []
+
+
+def _add_community(update: dict, results: list, query: str, *, content_limit: int) -> dict:
+    """Put GitHub and Reddit documents between official documentation and web results in
+    ``update``, and label the web entry ``[WEB]`` so synthesis can tell the sources apart.
+    Returns ``update`` unchanged when there is nothing to add or the merge fails."""
+    try:
+        github = [d for r in results if r.source_type == SourceType.GITHUB for d in r.documents]
+        reddit = [d for r in results if r.source_type == SourceType.REDDIT for d in r.documents]
+        if not (github or reddit):
+            return update  # failures/empties were already logged by the adapters
+        existing = update["source_documents"]
+        official = [d for d in existing if d.source_type == SourceType.OFFICIAL_DOCS]
+        web = [d for d in existing if d.source_type == SourceType.WEB]
+        official_entries = [e for e in update["search_results"] if is_official_docs_entry(e)]
+        web_entries = [e for e in update["search_results"] if not is_official_docs_entry(e)]
+        if any(d.content for d in web):
+            web_entries = [search_result_entry(query, web, content_limit=content_limit, label=WEB_LABEL)]
+        docs = official + github + reddit + web
+        return {
+            **update,
+            "search_results": official_entries
+            + community_entries(query, github + reddit, content_limit=COMMUNITY_CONTENT_LIMIT)
+            + web_entries,
+            "sources": [source_to_legacy(d) for d in docs],
+            "source_documents": docs,
+        }
+    except Exception as exc:
+        logger.warning("Could not merge GitHub/Reddit results (%s); continuing without them", type(exc).__name__)
+        return update
+
+
 async def _research_update(query: str, *, question: str | None, content_limit: int) -> dict:
-    """Web search, plus official documentation when ``question`` is a documentation
-    question. The two run concurrently; the official-docs side can only add results, never
-    remove or fail the web side. This is the seam Phase 6's source router replaces."""
-    plan = _plan_docs_search(question or query, query)
+    """Route the question (Phase 5), then search the selected sources concurrently: web
+    always, plus official documentation, GitHub and/or Reddit when the router picked them.
+    The optional sources can only add results, never remove or fail the web side. A raised
+    web failure propagates as it always has (and cancels the others); Phase 13 owns web
+    retries and timeouts."""
+    text = question or query
+    route = _route_for(text)
+    plan = _plan_docs_search(text, query)
+    if plan is None and route.docs_from_technology:
+        plan = _plan_technology_docs_search(text, query)
+    jobs = _community_jobs(route, query)
+
     docs_task = asyncio.create_task(_run_docs_search(plan)) if plan is not None else None
+    community_task = asyncio.create_task(run_adapters(jobs)) if jobs else None
+    background = [t for t in (docs_task, community_task) if t is not None]
     try:
         results = await tavily_tool.ainvoke({"query": query})
-    except BaseException:
+        update = _web_search_update(query, results, content_limit=content_limit)
         if docs_task is not None:
-            docs_task.cancel()
+            update = _add_official_docs(update, await docs_task, query)
+        if community_task is not None:
+            update = _add_community(update, await _community_results(community_task), query,
+                                    content_limit=content_limit)
+    except BaseException:
+        for task in background:
+            task.cancel()
         raise
-    update = _web_search_update(query, results, content_limit=content_limit)
-    if docs_task is not None:
-        update = _add_official_docs(update, await docs_task, query)
     return update
 
 async def simple_search_node(state: ResearchState):
@@ -265,13 +368,26 @@ def _official_docs_guidance(state) -> str:
         return OFFICIAL_DOCS_GUIDANCE
     return ""
 
+COMMUNITY_GUIDANCE = """
+
+SOURCE LABEL GUIDANCE:
+Research data blocks are labelled by source. [OFFICIAL DOCUMENTATION: ...] is authoritative documentation. [GITHUB: ...] is implementation and code evidence (repositories, examples, issues, pull requests): it shows how things are built and what problems are reported, not what is officially supported. [REDDIT: ...] is community experience and opinion: treat it as anecdotal, and never as authority for API or configuration behavior. [WEB] or unlabelled blocks are general web information. When a claim rests on GitHub or Reddit evidence, say so."""
+
+
+def _community_guidance(state) -> str:
+    """Empty (prompts unchanged) unless verified GitHub or Reddit documents were retrieved."""
+    docs = state.get("source_documents") or []
+    if any(getattr(d, "source_type", None) in (SourceType.GITHUB, SourceType.REDDIT) for d in docs):
+        return COMMUNITY_GUIDANCE
+    return ""
+
 async def synthesize_node(state: ResearchState):
     """Generate final answer from search results."""
     try:
         logger.info("Generating professional report...")
         
-        trimmed = [r[:1500] for r in prioritize_search_results(state["search_results"])[:12]]
-        guidance = _official_docs_guidance(state)
+        trimmed = [r[:1500] for r in select_search_results(state["search_results"], 12)]
+        guidance = _official_docs_guidance(state) + _community_guidance(state)
         all_results = "\n\n".join(trimmed)
         
         prompt = f"""Write a comprehensive professional research report answering: {state['question']}
@@ -339,8 +455,8 @@ Now write the complete professional report:"""
 async def _synthesize_fallback(state: ResearchState):
     """Fallback synthesis when main fails."""
     try:
-        trimmed = [r[:1000] for r in prioritize_search_results(state["search_results"])[:9]]
-        guidance = _official_docs_guidance(state)
+        trimmed = [r[:1000] for r in select_search_results(state["search_results"], 9)]
+        guidance = _official_docs_guidance(state) + _community_guidance(state)
         all_results = "\n\n".join(trimmed)
         
         prompt = f"""Question: {state['question']}

@@ -97,6 +97,24 @@ def _find_hits(text: str, registry: DocsRegistry) -> list[_Hit]:
     return hits
 
 
+def mentioned_technologies(
+    text: Optional[str], registry: DocsRegistry, *, include_weak: bool = False,
+    max_technologies: int = MAX_TECHNOLOGIES,
+) -> tuple[DocsEntry, ...]:
+    """Registry technologies named in ``text``, with no cue or veto rules (Phase 5: the
+    source router decides separately whether documentation is useful). Weak aliases
+    (``python``, ``compose``, ``openai``) are left out unless ``include_weak``."""
+    if not isinstance(text, str) or not text.strip():
+        return ()
+    normalized = normalize_text(text[:_MAX_TEXT_CHARS]).replace("’", "'")
+    found: dict[str, DocsEntry] = {}
+    for hit in _find_hits(normalized, registry):
+        if hit.weak and not include_weak:
+            continue
+        found.setdefault(hit.entry.id, hit.entry)
+    return tuple(found.values())[:max_technologies]
+
+
 def detect_docs_intent(
     text: Optional[str], registry: DocsRegistry, *, max_technologies: int = MAX_TECHNOLOGIES
 ) -> DocsIntent:
