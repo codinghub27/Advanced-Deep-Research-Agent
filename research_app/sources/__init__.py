@@ -1,4 +1,7 @@
-"""Source normalisation (Phase 3): raw provider results -> ``SourceDocument``."""
+"""Source normalisation (Phase 3): raw provider results -> ``SourceDocument``.
+
+Official documentation (Phase 4) lives in the ``research_app.sources.official_docs``
+subpackage; import it explicitly (it is not re-exported here)."""
 from research_app.sources.normalizer import (
     SNIPPET_MAX_CHARS,
     NormalizationError,

@@ -1,0 +1,129 @@
+{
+  "_comment": "Built-in official documentation registry. Every host/path below was fetched or found via a domain-restricted search on 2026-09-19 (see docs/phases/PHASE-04-OFFICIAL-DOCS.md). Hosts are matched exactly (a leading www. is ignored). Users extend or override entries with OFFICIAL_DOCS_REGISTRY_PATH.",
+  "technologies": [
+    {
+      "id": "python",
+      "name": "Python",
+      "aliases": ["python standard library", "python stdlib", "cpython"],
+      "weak_aliases": ["python"],
+      "sites": [
+        {"host": "docs.python.org", "version_patterns": ["^/(?P<version>\\d+(?:\\.\\d+)?)/"]}
+      ]
+    },
+    {
+      "id": "fastapi",
+      "name": "FastAPI",
+      "aliases": ["fastapi"],
+      "sites": [{"host": "fastapi.tiangolo.com"}]
+    },
+    {
+      "id": "uvicorn",
+      "name": "Uvicorn",
+      "aliases": ["uvicorn"],
+      "sites": [{"host": "uvicorn.dev"}]
+    },
+    {
+      "id": "pydantic",
+      "name": "Pydantic",
+      "aliases": ["pydantic"],
+      "sites": [
+        {
+          "host": "pydantic.dev",
+          "path_prefixes": ["/docs/validation/"],
+          "version_patterns": ["^/docs/validation/(?P<version>\\d+(?:\\.\\d+)*)/"]
+        }
+      ]
+    },
+    {
+      "id": "sqlalchemy",
+      "name": "SQLAlchemy",
+      "aliases": ["sqlalchemy"],
+      "sites": [
+        {"host": "docs.sqlalchemy.org", "version_patterns": ["^/en/(?P<version>\\d+(?:\\.\\d+)*)/"]}
+      ]
+    },
+    {
+      "id": "alembic",
+      "name": "Alembic",
+      "aliases": ["alembic"],
+      "sites": [{"host": "alembic.sqlalchemy.org"}]
+    },
+    {
+      "id": "langgraph",
+      "name": "LangGraph",
+      "aliases": ["langgraph"],
+      "sites": [{"host": "docs.langchain.com", "path_prefixes": ["/oss/python/langgraph"]}]
+    },
+    {
+      "id": "langchain",
+      "name": "LangChain",
+      "aliases": ["langchain"],
+      "sites": [{"host": "docs.langchain.com", "path_prefixes": ["/oss/python/langchain"]}]
+    },
+    {
+      "id": "qdrant",
+      "name": "Qdrant",
+      "aliases": ["qdrant"],
+      "sites": [{"host": "qdrant.tech", "path_prefixes": ["/documentation/"]}]
+    },
+    {
+      "id": "postgresql",
+      "name": "PostgreSQL",
+      "aliases": ["postgresql", "postgres", "psql"],
+      "sites": [
+        {
+          "host": "www.postgresql.org",
+          "path_prefixes": ["/docs/"],
+          "version_patterns": ["^/docs/(?P<version>\\d+(?:\\.\\d+)?)/"]
+        }
+      ]
+    },
+    {
+      "id": "docker",
+      "name": "Docker",
+      "aliases": ["docker", "dockerfile"],
+      "sites": [{"host": "docs.docker.com"}]
+    },
+    {
+      "id": "docker-compose",
+      "name": "Docker Compose",
+      "aliases": ["docker compose"],
+      "weak_aliases": ["compose"],
+      "sites": [
+        {
+          "host": "docs.docker.com",
+          "path_prefixes": ["/compose/", "/reference/compose-file/", "/reference/cli/docker/compose/"]
+        }
+      ]
+    },
+    {
+      "id": "tavily",
+      "name": "Tavily",
+      "aliases": ["tavily"],
+      "sites": [{"host": "docs.tavily.com"}]
+    },
+    {
+      "id": "openai-api",
+      "name": "OpenAI API",
+      "aliases": ["openai api", "openai sdk", "openai python sdk"],
+      "weak_aliases": ["openai"],
+      "sites": [
+        {"host": "developers.openai.com", "path_prefixes": ["/api/"]},
+        {"host": "platform.openai.com", "path_prefixes": ["/docs/"]}
+      ]
+    },
+    {
+      "id": "claude-api",
+      "name": "Claude API",
+      "aliases": ["claude api", "anthropic api", "anthropic sdk"],
+      "weak_aliases": ["claude", "anthropic"],
+      "sites": [{"host": "platform.claude.com", "path_prefixes": ["/docs/"]}]
+    },
+    {
+      "id": "groq",
+      "name": "Groq",
+      "aliases": ["groq", "groq api"],
+      "sites": [{"host": "console.groq.com", "path_prefixes": ["/docs/"]}]
+    }
+  ]
+}

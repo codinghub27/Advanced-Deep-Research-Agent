@@ -1,3 +1,4 @@
+import asyncio
 import operator
 import os
 import logging
@@ -10,8 +11,15 @@ from langgraph.types import Send
 from research_app.agent.vectordb import lookup_cache, store_cache
 from langgraph.graph import END
 from research_app.agent.llms import llm_groq
-from research_app.domain.legacy import search_result_entry, source_to_legacy
+from research_app.domain import SourceType
+from research_app.domain.legacy import (
+    official_docs_entries,
+    prioritize_search_results,
+    search_result_entry,
+    source_to_legacy,
+)
 from research_app.sources import normalize_tavily_response
+from research_app.sources.official_docs import OfficialDocsAdapter, plan_official_docs, prioritize
 
 logger = logging.getLogger(__name__)
 
@@ -143,11 +151,75 @@ def _web_search_update(query: str, response, *, content_limit: int) -> dict:
         "source_documents": docs,
     }
 
+OFFICIAL_DOCS_CONTENT_LIMIT = 1000  # per document; the entry is also capped at 1500 characters
+
+
+async def _tavily_search(payload: dict):
+    """Search callable for the official-docs adapter. ``tavily_tool`` is looked up at
+    call time so it can be replaced (tests)."""
+    return await tavily_tool.ainvoke(payload)
+
+
+def _plan_docs_search(question: str, query: str):
+    """An official-docs search plan, or None (= web only). Never raises: a detection or
+    registry problem must not stop research."""
+    try:
+        return plan_official_docs(question, query)
+    except Exception as exc:
+        logger.warning("Official docs planning failed (%s); using web search only", type(exc).__name__)
+        return None
+
+
+async def _run_docs_search(plan):
+    """Run the official-docs adapter; it returns a failed result instead of raising, and
+    this guards the rest."""
+    try:
+        return await OfficialDocsAdapter(_tavily_search, plan.registry).search(plan.request)
+    except Exception as exc:
+        logger.warning("Official docs search crashed (%s); continuing with web results", type(exc).__name__)
+        return None
+
+
+def _add_official_docs(update: dict, docs_result, query: str) -> dict:
+    """Put verified official documentation ahead of the web results in ``update``."""
+    if docs_result is None or not docs_result.documents:
+        return update  # failure/empty was already logged by the adapter
+    try:
+        docs = prioritize(list(docs_result.documents) + update["source_documents"])
+        return {
+            **update,
+            "search_results": official_docs_entries(
+                query, docs_result.documents, content_limit=OFFICIAL_DOCS_CONTENT_LIMIT
+            ) + update["search_results"],
+            "sources": [source_to_legacy(d) for d in docs],
+            "source_documents": docs,
+        }
+    except Exception as exc:
+        logger.warning("Could not merge official docs (%s); continuing with web results", type(exc).__name__)
+        return update
+
+
+async def _research_update(query: str, *, question: str | None, content_limit: int) -> dict:
+    """Web search, plus official documentation when ``question`` is a documentation
+    question. The two run concurrently; the official-docs side can only add results, never
+    remove or fail the web side. This is the seam Phase 6's source router replaces."""
+    plan = _plan_docs_search(question or query, query)
+    docs_task = asyncio.create_task(_run_docs_search(plan)) if plan is not None else None
+    try:
+        results = await tavily_tool.ainvoke({"query": query})
+    except BaseException:
+        if docs_task is not None:
+            docs_task.cancel()
+        raise
+    update = _web_search_update(query, results, content_limit=content_limit)
+    if docs_task is not None:
+        update = _add_official_docs(update, await docs_task, query)
+    return update
+
 async def simple_search_node(state: ResearchState):
     """Single search for simple questions."""
     query = state["question"]
-    results = await tavily_tool.ainvoke({"query": query})
-    update = _web_search_update(query, results, content_limit=400)
+    update = await _research_update(query, question=query, content_limit=400)
     update["sub_questions"] = [query]
     return update
 
@@ -173,26 +245,39 @@ Return ONLY JSON: {{"sub_questions": ["q1", "q2", "q3"]}}"""
         return {"messages": [], "sub_questions": [state["question"]]}
 
 def planner_router(state: ResearchState):
-    return [Send("search_node", {"query": q}) for q in state["sub_questions"]]
+    return [Send("search_node", {"query": q, "question": state["question"]}) for q in state["sub_questions"]]
 
 async def search_node(state: dict):
     """Run web search for a query."""
     query = state["query"]
-    results = await tavily_tool.ainvoke({"query": query})
-    return _web_search_update(query, results, content_limit=800)
+    return await _research_update(query, question=state.get("question"), content_limit=800)
+
+OFFICIAL_DOCS_GUIDANCE = """
+
+OFFICIAL DOCUMENTATION GUIDANCE:
+Some research data blocks are labelled [OFFICIAL DOCUMENTATION: ...]. For installation, API usage, configuration, technical behavior and version-specific facts, prefer those blocks over all other sources. If another source conflicts with them on these points, follow the official documentation."""
+
+
+def _official_docs_guidance(state) -> str:
+    """Empty (prompts unchanged) unless verified official documentation was retrieved."""
+    docs = state.get("source_documents") or []
+    if any(getattr(d, "source_type", None) == SourceType.OFFICIAL_DOCS for d in docs):
+        return OFFICIAL_DOCS_GUIDANCE
+    return ""
 
 async def synthesize_node(state: ResearchState):
     """Generate final answer from search results."""
     try:
         logger.info("Generating professional report...")
         
-        trimmed = [r[:1500] for r in state["search_results"][:12]]
+        trimmed = [r[:1500] for r in prioritize_search_results(state["search_results"])[:12]]
+        guidance = _official_docs_guidance(state)
         all_results = "\n\n".join(trimmed)
         
         prompt = f"""Write a comprehensive professional research report answering: {state['question']}
 
 RESEARCH DATA:
-{all_results}
+{all_results}{guidance}
 
 REPORT STRUCTURE:
 
@@ -254,13 +339,14 @@ Now write the complete professional report:"""
 async def _synthesize_fallback(state: ResearchState):
     """Fallback synthesis when main fails."""
     try:
-        trimmed = [r[:1000] for r in state["search_results"][:9]]
+        trimmed = [r[:1000] for r in prioritize_search_results(state["search_results"])[:9]]
+        guidance = _official_docs_guidance(state)
         all_results = "\n\n".join(trimmed)
         
         prompt = f"""Question: {state['question']}
 
 Data:
-{all_results}
+{all_results}{guidance}
 
 Write a detailed professional report with title, introduction, 3 main sections with specific facts, comparison if relevant, and conclusion. Minimum 800 words. Use [Source, Year] format for citations. Complete sentences only."""
         

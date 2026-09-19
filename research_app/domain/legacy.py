@@ -11,7 +11,11 @@ Also (Phase 3): ``search_result_entry`` renders ``SourceDocument``s as the
 are parsed in ``research_app/sources``, not here, and ``search_results`` strings are
 never parsed back.
 
-Used at runtime by the two search nodes in ``agent/state.py``.
+Phase 4 adds ``official_docs_entries`` (one labelled ``search_results`` entry per
+official-documentation document), ``is_official_docs_entry`` and
+``prioritize_search_results`` (official entries first, for the synthesis prompt).
+
+Used at runtime by the two search nodes and the synthesis step in ``agent/state.py``.
 """
 from __future__ import annotations
 
@@ -74,6 +78,53 @@ def search_result_entry(
     they always were."""
     condensed = [f"{d.url}\n{d.content[:content_limit]}" for d in docs if d.content]
     return f"Query: {query}\n" + "\n---\n".join(condensed)
+
+
+OFFICIAL_DOCS_LABEL = "[OFFICIAL DOCUMENTATION"
+# The synthesis step reads at most this many characters of each search_results entry.
+SEARCH_ENTRY_MAX_CHARS = 1500
+
+
+def official_docs_entries(
+    query: str,
+    docs: Iterable[SourceDocument],
+    *,
+    content_limit: int = 1000,
+    entry_limit: int = SEARCH_ENTRY_MAX_CHARS,
+) -> list[str]:
+    """One ``search_results`` entry per official-documentation document::
+
+        Query: <q>
+        [OFFICIAL DOCUMENTATION: <technology>, version <v>]
+        <url>
+        <content>
+
+    The second line is the marker (``is_official_docs_entry``). Each entry is at most
+    ``entry_limit`` characters (the synthesis step cuts entries there), so the header is
+    never sacrificed to a long body. Documents without content are left out."""
+    entries: list[str] = []
+    for doc in docs:
+        if not doc.content:
+            continue
+        name = doc.technology or doc.domain or "unknown"
+        label = f"{OFFICIAL_DOCS_LABEL}: {name}" + (f", version {doc.version}" if doc.version else "") + "]"
+        head = f"Query: {query[:200]}\n{label}\n{doc.url}\n"
+        budget = max(0, min(content_limit, entry_limit - len(head)))
+        entries.append(head + doc.content[:budget])
+    return entries
+
+
+def is_official_docs_entry(entry: str) -> bool:
+    lines = entry.split("\n", 2)
+    return len(lines) > 1 and lines[1].startswith(OFFICIAL_DOCS_LABEL)
+
+
+def prioritize_search_results(entries: Iterable[str]) -> list[str]:
+    """Official-documentation entries first; everything else keeps its order."""
+    entries = list(entries)
+    return [e for e in entries if is_official_docs_entry(e)] + [
+        e for e in entries if not is_official_docs_entry(e)
+    ]
 
 
 def sources_from_legacy(
