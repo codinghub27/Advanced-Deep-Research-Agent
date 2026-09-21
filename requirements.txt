@@ -17,3 +17,4 @@ qdrant-client
 langchain-qdrant
 fastembed
 sentence-transformers
+torch>=2.9

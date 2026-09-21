@@ -108,6 +108,7 @@ No edge goes back to an earlier node.
 
 ## Dependencies
 - Added `fastembed` (dense + BM25 on ONNX; no torch) and `sentence-transformers` (CrossEncoder; pulls in torch, imported lazily).
+- `torch>=2.9` pinned explicitly in `requirements.txt` (Python 3.14 wheels; the venv has torch 2.14.0, sentence-transformers 6.1.0, fastembed 0.8.0).
 - Not added: `rank_bm25`; `langchain-qdrant` stays unused (no prefetch/RRF-k control).
 - First use downloads models (≈130 MB fastembed; ≈2.3 GB for `bge-reranker-v2-m3`).
 
@@ -177,7 +178,7 @@ npx -y pyright --pythonpath .venv/Scripts/python.exe research_app/rag research_a
 - Stored web content is untrusted and re-enters synthesis through the existing evidence path; prompt-injection hardening is Phase 14. Stale content is a risk: chunks keep `retrieved_at`, but freshness policy is Phase 12 (time-sensitive questions bypass stored sources).
 
 ## Known Issues
-1. **Default reranker not verified with real weights** — `bge-reranker-v2-m3` (≈2.3 GB) download stalled locally. The code path was verified with a real small cross-encoder. To close: run Test 4 on a good connection.
+1. **Default reranker not verified with real weights** — `bge-reranker-v2-m3` (≈2.3 GB) download stalled locally (retried on 2026-09-21: still 0 bytes of the missing blob; only ≈67 MB partial cached). The code path was verified with a real small cross-encoder. To close: run Test 4 on a good connection.
 2. **`.env.example` not updated** — editing it was blocked by the session's permission settings; the variables are documented in the table above and in `rag/settings.py`.
 3. **Cold start**: the first retrieval with the reranker enabled loads/downloads the model inside `RAG_TIMEOUT_S`; if it exceeds it, that run falls back to live research while the load finishes in the background. Warm the model before enabling in production (e.g. one `scripts/rag_manual.py query`) or raise `RAG_TIMEOUT_S`.
 4. **Gate thresholds are uncalibrated**: without the reranker, dense/hybrid scores are weakly discriminative (Test 1 shows a 0.57–0.60 spread); `RAG_RELEVANCE_THRESHOLD=0.5` is a starting point. That is why both flags default off.
