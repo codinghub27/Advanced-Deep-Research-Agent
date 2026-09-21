@@ -1,9 +1,11 @@
 # PHASE-07 — Hybrid Source RAG
 
 ## Status
-In Progress — implementation done and verified; two items open (see Known Issues #1 and #2):
-the default reranker `BAAI/bge-reranker-v2-m3` has not been run with real weights, and
-`.env.example` is not updated.
+In Progress — **not production-ready; keep `SOURCE_RAG_ENABLED=false`.** The retrieval layer is built and verified
+(Pass 1 / Pass 2 below, with the real `bge-reranker-v2-m3`). Open items before the flag should ever be turned on:
+the flag-off node-trace deviation (Verification, Pass 1), the review findings R1–R3 (relevance gate fails open without
+the reranker; a RAG hit can still trigger a live gap search; inline indexing latency), and `.env.example` not updated.
+Phases 8–19 are **not started** (see "Known Issues / Out of Scope").
 
 ## Goal
 Implement Qdrant dense + BM25 + rank fusion + reranking over stored source documents, kept
@@ -34,7 +36,9 @@ Verified by inspection before coding (the repo is thinner than CLAUDE.md describ
   metadata lives in the Qdrant payload. Durable evidence tables are Phase 8.
 
 ## Implemented Changes
-Flow with both flags **off** is byte-for-byte the Phase 6 flow. With `SOURCE_RAG_ENABLED=true`:
+With both flags **off**, answers, sources, search calls and LLM calls are identical to Phase 6 (Pass 1), but the node
+trace is **not** byte-for-byte: a no-op `index_sources_node` runs between `format_response` and `save_to_cache_node`
+and reaches API clients as one extra SSE `progress` event. With `SOURCE_RAG_ENABLED=true`:
 
 ```
 semantic_cache -> classify_node -> rag_gate_router
@@ -169,16 +173,17 @@ npx -y pyright --pythonpath .venv/Scripts/python.exe research_app/rag research_a
 
 ## Test Results
 - New: 59 tests across chunking, store (dense/sparse/hybrid, RRF fallback, filters, `answer_cache` isolation), retriever/reranker/indexer/settings, nodes/graph contract — all pass (`test_domain_isolation` included).
-- Full suite: 617 tests, all pass except `tests/test_source_router.py`, which currently fails to import because of a stray ` hy` typed at the start of line 1 (uncommitted, not from this phase; 598 other tests ran and passed). It was left as is.
-- Pyright on touched files: 0 errors.
+- Full suite on the clean committed trees (git worktrees, dummy API keys, `unittest discover -s tests -t .`): **515 tests at `880f4e0` (pre-Phase-7), 570 at `986b243` (Phase 7) — 0 failures in both.** (An earlier 617 figure came from the dirty working tree with uncommitted Phase 6 real-time tests; `tests/test_source_router.py` had a stray ` hy` typed on line 1 there, uncommitted and unrelated to this phase.)
+- Pyright (CLI) on touched files: 0 Phase 7 errors; 3 baseline errors remain (`graph.py:40`, `domain/legacy.py` x2).
+- Pass 1 / Pass 2 below.
 
 ## Security / Reliability Notes
-- Every external call has a timeout and returns empty on failure; one failed store never fails the run. Indexing is fire-and-forget inside the graph and never raises.
+- Every external call has a timeout and returns empty on failure; one failed store never fails the run. Indexing never raises, but it is awaited inline (`format_response -> index_sources_node -> save_to_cache_node`), so with ingest on it delays the answer-cache save and the end of the stream by up to `RAG_TIMEOUT_S` (review finding R3); it is not fire-and-forget.
 - `QDRANT_API_KEY` is not logged or repr'd. `scripts/rag_manual.py` refuses the production collection name.
 - Stored web content is untrusted and re-enters synthesis through the existing evidence path; prompt-injection hardening is Phase 14. Stale content is a risk: chunks keep `retrieved_at`, but freshness policy is Phase 12 (time-sensitive questions bypass stored sources).
 
 ## Known Issues
-1. **Default reranker not verified with real weights** — `bge-reranker-v2-m3` (≈2.3 GB) download stalled locally (retried on 2026-09-21: still 0 bytes of the missing blob; only ≈67 MB partial cached). The code path was verified with a real small cross-encoder. To close: run Test 4 on a good connection.
+1. ~~Default reranker not verified with real weights~~ — **closed 2026-09-21**: the ≈2.3 GB download completed and Pass 2 ran on the real `BAAI/bge-reranker-v2-m3` (scores in Pass 2). The standalone Test 4 command was not re-run with it.
 2. **`.env.example` not updated** — editing it was blocked by the session's permission settings; the variables are documented in the table above and in `rag/settings.py`.
 3. **Cold start**: the first retrieval with the reranker enabled loads/downloads the model inside `RAG_TIMEOUT_S`; if it exceeds it, that run falls back to live research while the load finishes in the background. Warm the model before enabling in production (e.g. one `scripts/rag_manual.py query`) or raise `RAG_TIMEOUT_S`.
 4. **Gate thresholds are uncalibrated**: without the reranker, dense/hybrid scores are weakly discriminative (Test 1 shows a 0.57–0.60 spread); `RAG_RELEVANCE_THRESHOLD=0.5` is a starting point. That is why both flags default off.
@@ -186,7 +191,79 @@ npx -y pyright --pythonpath .venv/Scripts/python.exe research_app/rag research_a
 6. Docker was not running; server-side behaviour was verified against the existing local Qdrant server on `localhost:6333` instead.
 7. Local-engine shutdown prints a harmless `QdrantClient.__del__` traceback.
 
+## Verification (graph wiring, 2026-09-21)
+Reproduce from the repo root (`.venv/Scripts/python -W ignore <script>`): `scripts/phase7_trace_flag_off.py`
+(pass 1, run in each checkout) and `scripts/phase7_verify_branching.py` (pass 2). Both use `ScriptedLLM` +
+`FakeTavily` from the existing tests, so no LLM/Tavily credentials or network are needed; retrieval, embeddings, Qdrant
+(embedded, isolated folder, collection `source_chunks`) and the reranker are real. Note: the pre-Phase-7 live baseline
+queries were never executed in Phase 1 (they need a DB, LLM and Tavily), so there is no recorded pre-Phase-7 output;
+pass 1 instead diffs two clean git worktrees (`880f4e0` vs `986b243`) running identical scripted queries.
+
+### Pass 1 — regression, `SOURCE_RAG_ENABLED=false` (default)
+6 scenarios: complex how-to, simple question, cache hit, critic retry, time-sensitive, web tool raising.
+- **Identical** in both trees: final answer, sources, Tavily calls (query + domains), free-text/structured LLM call counts, cache writes, errors.
+- **Deviation (reported, not fixed):** the node trace differs by one node in 4 of 6 scenarios (all except cache hit and the crashing web-failure run, which never reaches it): `format_response -> index_sources_node -> save_to_cache_node`. The node returns `{}`. `main.py` (`~L299-303`) emits `{type: 'progress', node, label}` for every node and `NODE_LABELS` has no entry for `index_sources_node` (or `source_rag_node`), so clients get one extra event whose label is the raw node name. `chat.html` ignores unknown nodes (`NODE_STEP[data.node] ?? lastStep`); a strict or label-displaying client would not. This violates "graph behavior identical with the flag off" (CLAUDE.md Rule 3, additive only). Smallest fixes: a conditional edge that bypasses the node unless `SOURCE_RAG_INGEST_ENABLED`, and `NODE_LABELS` entries for the new nodes.
+- Pre-existing (both trees): a raw exception from the web search tool propagates out of `search_node` and ends the run (Phase 13 territory).
+- Suites: 515 pass (pre) / 570 pass (post), see Test Results.
+
+### Pass 2 — branching, `SOURCE_RAG_ENABLED=true`, real `BAAI/bge-reranker-v2-m3`
+Seed: the 9-doc `rag_manual` corpus + 2 extra synthetic FastAPI pages = 11 chunks in `source_chunks` (embedded Qdrant, temp folder). Also an `answer_cache` collection (3 points) in the same store.
+
+| Scenario | Top score / chunks >= 0.5 | Path | Tavily / planner LLM |
+|---|---|---|---|
+| a. relevant: "How do I install FastAPI and start the development server?" | 0.999 / 3 | `source_rag -> evidence_collection -> gap_detection -> synthesis -> critic -> format_response -> index_sources -> save_to_cache` | 0 / none |
+| a'. same topic, one on-topic chunk (PostgreSQL CREATE INDEX), default `RAG_MIN_CHUNKS=2` | 0.999 / 1 | **falls through** to `planner -> search x2 -> ... -> targeted_search -> ...` | 8 / yes |
+| a''. same, `RAG_MIN_CHUNKS=1` | 0.999 / 1 | hits (as in a) | 0 / none |
+| a'''. Test-1 query ("what do I type to set up the python web framework with automatic docs") | 0.002 / 0 | **falls through** (the reranker scores it ~0 against the FastAPI pages) | 8 / yes |
+| b. irrelevant: "health benefits of intermittent fasting" | 0.000 / 0 | falls through to `planner -> search -> evidence -> gap -> targeted_search -> synthesis -> critic -> retry -> format` | 2 / yes |
+| b'. same question, flag off | – | node list identical to b minus `source_rag_node` | 2 / yes |
+
+- **a:** the RAG-hit branch never calls the planner, `search_node` or Tavily; the LLM calls were understanding + critic + one synthesis. It is *not* literally `source_rag -> synthesis`: it goes through `evidence_collection` and `gap_detection` (pure Python, no I/O) first, which is what reuses the existing synthesis/critic unchanged.
+- **b:** the fall-through is the unchanged full-research path; b vs b' differ only by the extra `source_rag_node` step. (Path equality with the pre-Phase-7 tree for the same code was shown in Pass 1.)
+- **c (answer cache untouched):** the `answer_cache` collection stayed at 3 points while `source_chunks` went 11 -> 15 (ingest on, after the live run of scenario b). In-memory answer cache (`vectordb`) 0 -> 0; the local Qdrant server's existing `research_cache` (read-only check) 6 -> 6. `agent/vectordb.py` has no diff. Caveat: the graph's own `store_cache` was stubbed in the harness, so this shows that source_chunks writes do not touch the answer cache, not that `save_to_cache_node` is unchanged.
+- **Finding:** with the real reranker scores are near-binary (0.999 vs ~0.00). Default `RAG_MIN_CHUNKS=2` therefore needs two on-topic chunks; a corpus with a single on-topic chunk per subject always falls through (cost: an extra live search, not a wrong answer). The Test-1 style semantic query with no shared keywords also misses (a''').
+- Harness caveats: retriever and indexer share one Qdrant client via a patch of `store.make_client` (embedded mode allows one client per folder); `RAG_TIMEOUT_S=300` so the first model load is not cut off; the corpus is synthetic paraphrases, not fetched pages.
+
+### Independent review (CLAUDE.md Phase 7 + Rules 3, 8, 9, 10)
+No agent named `code-reviewer` exists in this session (custom agents: `.claude/agents/researcher.yaml` only; built-ins: claude, Explore, general-purpose, Plan, ...). A read-only `general-purpose` agent reviewed the clean `986b243` tree instead. Its verdict: the library layer meets the Phase 7 goals; the graph integration does **not yet** meet Rules 8/9 safely; Rule 3 holds for the answer cache and is additive-only for the SSE stream; Rule 10 holds (no eval/LangSmith code); "do not enable `SOURCE_RAG_ENABLED` until R1–R3 are fixed". Evidence levels are as the reviewer stated them:
+- **R1 (major, run by the reviewer)** — the gate is rank-derived when the reranker is off or failed to load (`RERANK_ENABLED=false`, or the sticky `_failed` after a load error): hybrid `rag_score` = RRF rank / (2/k), dense has no similarity floor, so an off-topic question returned three chunks scoring 1.0 / 0.976 / 0.976 and would be answered from stored sources. Fix: fail closed unless results are `reranked`, or add a dense-cosine floor; retry a failed reranker load after a cooldown. (Consistent with Known Issue 4 below, but worse than that entry says.)
+- **R2 (major, code reading; not reproduced in Pass 2)** — a RAG hit can still trigger a live search: `evidence_for()` filters by word-overlap (`relevance()`, default 0.3), a semantic hit with little word overlap yields "no evidence" for the sub-question, `gap_detection` then emits follow-ups and `targeted_search` calls Tavily (`GAP_SEARCH_ENABLED` default true); a critic retry can also search. No test covers `source_rag -> evidence_collection -> gap_detection`. In Pass 2 the reranker gate itself rejected the low-overlap query, so the hit + gap combination did not occur. Fix: treat `provider == "source_chunks"` documents as relevant in the evidence pool; add a flow test.
+- **R3 (major, code reading)** — inline indexing delays `done`/answer-cache save by up to `RAG_TIMEOUT_S` (first use includes a model download). Fix: order `save_to_cache -> index_sources -> END` or a tracked background task.
+- **R4 (major, run by the reviewer)** — `sentence-transformers` + `torch>=2.9` exist only to allow `bge-reranker-v2-m3`; fastembed ships ONNX cross-encoders (bge-reranker-base, jina-reranker-v2-base-multilingual, MiniLM), so torch is avoidable. The `torch>=2.9` pin requested for this phase was added regardless. Decision needed: keep torch + bge-v2-m3, or move the `cross_encoder` provider to fastembed.
+- **R5 (quality)** — `synthesis.build_sources` truncates a page's joined chunks to 1000 chars (web/Reddit) or 1500 (official docs) while `RAG_CHUNK_SIZE` defaults to 1200, so the gating chunk of a non-official page can be cut before synthesis sees it.
+- **R6 (minor, mostly read)** — Rule 8 gaps: `wait_for(to_thread)` cancels the await, not the thread (cold-start requests can pile up on the reranker lock); lazily-built store/reranker without a lock; `_hybrid_points` catches every exception and retries as separate queries (a blackholed Qdrant can exceed `QDRANT_TIMEOUT_S`); embedding/rerank have only the outer timeout; retriever and indexer build separate stores.
+- **R7 (minor)** — stale/poisoned content: no default max age (`RetrievalFilter.retrieved_after` exists but the node never passes it); a shrunken re-indexed page leaves old tail chunks (no delete-by-source); no quality filter on ingest. TTL/invalidation is Phase 12 and injection hardening Phase 14, but Phase 7 makes one poisoned page re-enter synthesis for every related later query.
+- **R8 (minor)** — `NODE_LABELS` / SSE deviation: same as Pass 1.
+- **R9 (minor)** — `RAG_MIN_CHUNKS` counts chunks, not sources (two chunks of one page satisfy it), and a lone strong chunk is discarded on a miss instead of being kept as evidence. Not a defect by itself.
+- **R10 (nit)** — `agent/temporal.py` (104 lines) is Phase 6 real-time work carried into this commit; only `is_time_sensitive` is used (scope mixing, Rule 4). Graph never uses the metadata filters, so official docs cannot be preferred on a RAG hit; the legacy SSE `sources` list is empty on a RAG hit (`citations` are populated).
+
+### Decisions
+- Reported the flag-off node-trace deviation and did **not** change graph code during verification; the fix is small but changes wiring, so it needs an explicit go-ahead.
+- Kept `RAG_MIN_CHUNKS=2` / `RAG_RELEVANCE_THRESHOLD=0.5` defaults; the hit scenario was demonstrated by seeding a corpus with >= 2 on-topic chunks (and separately with `RAG_MIN_CHUNKS=1`), not by tuning the defaults.
+- Seed corpus is synthetic; the verification scripts live in `scripts/` and never write to the server's collections (embedded store only).
+
+## Known Issues / Out of Scope — NOT production-ready
+Phase 7 delivers only the retrieval layer and a flag-gated graph detour. **Phases 8–19 are not started.** In particular:
+
+| Phase | Status | What is still missing |
+|---|---|---|
+| 8 Evidence pipeline and store | Not started | Evidence is still per-request and in-memory (word-overlap relevance); no PostgreSQL `sources`/`evidence` tables; chunk metadata lives only in the Qdrant payload; no evidence enrichment or quality filter on ingest |
+| 9 Gap detection and iterative research | Not started | Gap detection does not use RAG evidence sensibly yet (R2); one bounded gap round only |
+| 10 Synthesis, citations, grounding | Not started | Same Phase 6 synthesis; truncation of chunks (R5); no claim-level grounding |
+| 11 Critic and targeted retry | Not started | Phase 6 critic reused unchanged |
+| 12 Semantic cache and freshness | Not started | The answer cache is an **in-process dict with Jaccard word overlap** (`agent/vectordb.py`), not Qdrant and not semantic; no `answer_cache` Qdrant collection exists; no TTL/freshness/invalidation; stored chunks have no max age (R7) |
+| 13 Reliability and fault tolerance | Not started | Retries/backoff/circuit breaking; raw tool exceptions still end a run; R6 |
+| 14 Security and API hardening | Not started | Prompt-injection defenses for stored/retrieved content, SSRF, rate limits, auth review |
+| 15 Performance and cost | Not started | Ingest runs inline (R3); no embedding batching/reuse work beyond a batch size setting |
+| 16 API, streaming, long-running research | Not started | No run IDs, status tracking, cancellation; SSE labels for the new nodes missing (Pass 1) |
+| 17 Docker and production config | Not started | Docker not run in this phase; no image/health checks for the RAG stack or model warm-up |
+| 18 Observability | Not started | Log lines only; no metrics/tracing for retrieval latency or scores |
+| 19 Final manual validation | Not started | The 20-case matrix has not been run; this phase's manual tests are Pass 1/2 + Tests 1-7 |
+
+Other open items: `.env.example` is not updated (edits are blocked by the session's permission settings; variables are in the settings table above); the standalone Test 4 was not re-run with `bge-reranker-v2-m3`; the gate thresholds are uncalibrated on real data.
+
 ## Git Commit
+`986b243` (`phase-7: pin torch>=2.9 ...`) and the final checkpoint `phase-7: hybrid source RAG, flag-gated node wired into graph` (docs + verification scripts).
 `2ced340` `phase-7: hybrid source RAG (dense + BM25 + RRF + rerank)` on branch `phase-7-hybrid-rag`, pushed to `origin` (not merged into `main`).
 
 ## Next Phase
