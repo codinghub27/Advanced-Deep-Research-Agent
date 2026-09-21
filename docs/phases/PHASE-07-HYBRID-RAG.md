@@ -186,7 +186,7 @@ npx -y pyright --pythonpath .venv/Scripts/python.exe research_app/rag research_a
 7. Local-engine shutdown prints a harmless `QdrantClient.__del__` traceback.
 
 ## Git Commit
-Not created yet at the time of writing. Suggested: `phase-7: hybrid source RAG (dense + BM25 + RRF + rerank)`.
+`2ced340` `phase-7: hybrid source RAG (dense + BM25 + RRF + rerank)` on branch `phase-7-hybrid-rag`, pushed to `origin` (not merged into `main`).
 
 ## Next Phase
 Phase 8 — Evidence Pipeline and Evidence Store (durable evidence metadata in PostgreSQL, searchable content in Qdrant).
