@@ -44,6 +44,8 @@ PHASE6_NODES = (BASELINE_NODES - {"synthesize_node"}) | {
     "evidence_collection", "gap_detection", "targeted_search", "synthesis_node",
     "critic_node", "retry_node", "format_response",
 }
+# Phase 7 adds the stored-source lookup and the indexing step (both off unless their flag is set).
+PHASE7_NODES = PHASE6_NODES | {"source_rag_node", "index_sources_node"}
 FRAMEWORK_PATHS = {"/openapi.json", "/docs", "/docs/oauth2-redirect", "/redoc"}
 
 
@@ -97,9 +99,9 @@ class BaselineSnapshotTests(unittest.TestCase):
         self.assertEqual(routes, BASELINE_ROUTES | PHASE6_ROUTES)
         self.assertTrue(BASELINE_ROUTES <= routes)
 
-    def test_graph_nodes_are_the_baseline_plus_the_phase6_pipeline(self):
+    def test_graph_nodes_are_the_baseline_plus_the_phase6_pipeline_and_phase7_rag(self):
         nodes = set(compiled_graph.get_graph().nodes) - {"__start__", "__end__"}
-        self.assertEqual(nodes, PHASE6_NODES)
+        self.assertEqual(nodes, PHASE7_NODES)
         self.assertTrue((BASELINE_NODES - {"synthesize_node"}) <= nodes)
 
 

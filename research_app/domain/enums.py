@@ -116,3 +116,10 @@ class CriticSeverity(str, Enum):
     HIGH = "high"
     MEDIUM = "medium"
     LOW = "low"
+
+
+class RetrievalMode(str, Enum):
+    """How ``source_chunks`` is searched (Phase 7). ``DENSE`` is the rollback / baseline path."""
+    DENSE = "dense"
+    SPARSE = "sparse"
+    HYBRID = "hybrid"

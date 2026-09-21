@@ -15,3 +15,5 @@ psycopg[binary]
 pydantic
 qdrant-client
 langchain-qdrant
+fastembed
+sentence-transformers

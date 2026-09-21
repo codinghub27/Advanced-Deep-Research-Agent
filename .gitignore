@@ -60,3 +60,6 @@ local_settings.py
 
 # Tests
 .pytest_cache/
+
+# Phase 7 manual-test Qdrant data (scripts/rag_manual.py)
+.rag_manual/

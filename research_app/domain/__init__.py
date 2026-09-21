@@ -10,13 +10,14 @@ from research_app.domain.enums import (
     GapKind,
     QueryIntent,
     ResultStatus,
+    RetrievalMode,
     RunStatus,
     SourceIntent,
     SourceType,
     TaskStatus,
     TimeSensitivity,
 )
-from research_app.domain.interfaces import AnswerCache, SourceAdapter
+from research_app.domain.interfaces import AnswerCache, Reranker, Retriever, SourceAdapter
 from research_app.domain.models import (
     Citation,
     CriticIssue,
@@ -30,7 +31,10 @@ from research_app.domain.models import (
     ResearchResult,
     ResearchRun,
     ResearchTask,
+    RetrievalFilter,
+    RetrievedChunk,
     SearchRequest,
+    SourceChunk,
     SourceCredibility,
     SourceDocument,
     canonical_url,
@@ -59,8 +63,9 @@ __all__ = [
     "ResearchMetadata", "ResearchResponse", "RoutingDecision", "SourceIntent", "SourceOutcome",
     "SynthesisResult", "Evidence", "Gap", "GapAnalysis", "GapKind", "HistoryTurn",
     "QueryIntent", "ResearchError", "ResearchQuery", "ResearchResult",
-    "ResearchRun", "ResearchTask", "ResultStatus", "RunStatus", "SearchRequest",
-    "SourceAdapter", "SourceCredibility", "SourceDocument", "SourceType",
+    "ResearchRun", "ResearchTask", "ResultStatus", "RetrievalFilter", "RetrievalMode",
+    "RetrievedChunk", "Reranker", "Retriever", "RunStatus", "SearchRequest",
+    "SourceAdapter", "SourceChunk", "SourceCredibility", "SourceDocument", "SourceType",
     "TaskStatus", "TimeSensitivity", "canonical_url", "new_id", "source_id_for",
     "utc_now",
 ]

@@ -120,6 +120,8 @@ class ResearchState(TypedDict):
     retry_performed: bool
     limitations: list
     citations: list  # what the UI and the database receive (list of dicts)
+    rag_hit: bool  # Phase 7: answered from stored sources (source_chunks)
+    rag_top_score: float  # Phase 7: best retrieval score of the lookup
     started_at: float
 
 class SearchPlan(BaseModel):

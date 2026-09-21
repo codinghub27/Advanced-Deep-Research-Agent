@@ -318,6 +318,56 @@ class CriticResult(DomainModel):
     suggestions: list[str] = Field(default_factory=list)
 
 
+# --------------------------------------------------------------------------- source RAG (Phase 7)
+
+class SourceChunk(DomainModel):
+    """One indexed slice of a ``SourceDocument`` (what ``source_chunks`` stores).
+
+    ``chunk_id`` is deterministic (source + position), so indexing the same document twice
+    overwrites instead of duplicating."""
+
+    chunk_id: str
+    source_id: str
+    chunk_index: int = Field(ge=0)
+    text: str = Field(min_length=1)
+    url: HttpUrl
+    title: Optional[str] = None
+    domain: str = ""
+    source_type: SourceType = SourceType.WEB
+    technology: Optional[str] = None
+    version: Optional[str] = None
+    retrieved_at: UtcDatetime = Field(default_factory=utc_now)
+    published_at: Optional[UtcDatetime] = None
+    provider: Optional[str] = None
+    query: Optional[str] = None
+
+
+class RetrievalFilter(DomainModel):
+    """Metadata filter for source retrieval. Empty fields do not filter."""
+
+    source_types: list[SourceType] = Field(default_factory=list)  # any of
+    domains: list[str] = Field(default_factory=list)  # any of
+    technology: Optional[str] = None
+    retrieved_after: Optional[UtcDatetime] = None
+    retrieved_before: Optional[UtcDatetime] = None
+
+    @property
+    def is_empty(self) -> bool:
+        return not (self.source_types or self.domains or self.technology
+                    or self.retrieved_after or self.retrieved_before)
+
+
+class RetrievedChunk(DomainModel):
+    """A chunk with its retrieval score. ``score`` is 0-1 (rerank probability when reranked,
+    otherwise a normalised retrieval score); ``fused_score`` keeps the raw pre-rerank score."""
+
+    chunk: SourceChunk
+    score: Score
+    rank: int = Field(ge=0)
+    fused_score: Optional[float] = None
+    reranked: bool = False
+
+
 # --------------------------------------------------------------------------- run
 
 class ResearchRun(DomainModel):

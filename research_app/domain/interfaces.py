@@ -5,10 +5,16 @@ and the evidence store get their interfaces in the phases that build them.
 """
 from __future__ import annotations
 
-from typing import Protocol, runtime_checkable
+from typing import Optional, Protocol, Sequence, runtime_checkable
 
 from research_app.domain.enums import SourceType
-from research_app.domain.models import ResearchResult, SearchRequest
+from research_app.domain.models import (
+    ResearchResult,
+    RetrievalFilter,
+    RetrievedChunk,
+    SearchRequest,
+    SourceDocument,
+)
 
 
 @runtime_checkable
@@ -34,3 +40,21 @@ class AnswerCache(Protocol):
     def lookup(self, question: str) -> tuple[bool, str]: ...
 
     def store(self, question: str, answer: str) -> None: ...
+
+
+@runtime_checkable
+class Retriever(Protocol):
+    """Source-knowledge retrieval (Phase 7). Must not raise for ordinary failures (store down,
+    timeout): return ``[]`` so the run falls back to live research."""
+
+    async def retrieve(
+        self, query: str, filters: Optional[RetrievalFilter] = None, top_k: Optional[int] = None
+    ) -> list[SourceDocument]: ...
+
+
+@runtime_checkable
+class Reranker(Protocol):
+    """Re-orders retrieved chunks by relevance to the query. A Cohere/Jina/... implementation
+    only needs this method plus an entry in ``rag.reranker.RERANKERS``."""
+
+    def rerank(self, query: str, chunks: Sequence[RetrievedChunk], top_k: int) -> list[RetrievedChunk]: ...
