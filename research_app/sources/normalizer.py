@@ -24,14 +24,14 @@ from __future__ import annotations
 import logging
 import re
 import unicodedata
-from datetime import datetime
+from datetime import datetime, timedelta
 from email.utils import parsedate_to_datetime
 from typing import Any, Iterable, Mapping, Optional
 from urllib.parse import urlsplit, urlunsplit
 
 from pydantic import ValidationError
 
-from research_app.domain import SourceDocument, SourceType, utc_now
+from research_app.domain import DateConfidence, SourceDocument, SourceType, utc_now
 
 logger = logging.getLogger(__name__)
 
@@ -122,6 +122,69 @@ def parse_datetime(value: Any) -> Optional[datetime]:
         return None
 
 
+_RELATIVE_DATE = re.compile(
+    r"^(?:(?P<amount>\d+)\s+(?P<unit>day|week|month|year)s?\s+ago|(?P<yesterday>yesterday)"
+    r"|(?P<today>today|just now))$",
+    re.I,
+)
+_RELATIVE_DAYS = {"day": 1, "week": 7, "month": 30, "year": 365}
+
+
+def parse_relative_date(value: Any, *, now: Optional[datetime] = None) -> Optional[datetime]:
+    """"N days/weeks/months/years ago", "yesterday", "today"/"just now" -> ``datetime``,
+    anchored to ``now`` (the batch's ``retrieved_at`` when called from the normalizer, since
+    that is the only clock a provider's relative wording can be read against). ``None`` for
+    anything else -- this never guesses at free text, only an exact relative-date phrase.
+    """
+    if not isinstance(value, str):
+        return None
+    match = _RELATIVE_DATE.match(value.strip())
+    if not match:
+        return None
+    anchor = now or utc_now()
+    if match.group("yesterday"):
+        return anchor - timedelta(days=1)
+    if match.group("today"):
+        return anchor
+    amount = int(match.group("amount"))
+    unit = match.group("unit").lower()
+    return anchor - timedelta(days=amount * _RELATIVE_DAYS[unit])
+
+
+def _extract_date_field(
+    raw: Mapping[str, Any],
+    keys: tuple[str, ...],
+    *,
+    anchor: datetime,
+    consumed: set,
+) -> tuple[Optional[datetime], Optional[DateConfidence], Optional[str]]:
+    """Try each key in ``keys`` in order, mirroring the original single-field loop exactly:
+    the first key with a *parseable* value wins and is consumed; a key whose value cannot be
+    parsed (absolute or relative) is left unconsumed so it survives in ``metadata`` verbatim
+    (never invented, never dropped), and the loop moves on to the next key. Adds relative-date
+    support and confidence/source bookkeeping on top of the original behaviour.
+    """
+    confidence: Optional[DateConfidence] = None
+    source: Optional[str] = None
+    for key in keys:
+        value = raw.get(key)
+        if value is None:
+            consumed.add(key)
+            continue
+        parsed = parse_datetime(value)
+        if parsed is not None:
+            consumed.add(key)
+            return parsed, DateConfidence.EXACT, key
+        relative = parse_relative_date(value, now=anchor)
+        if relative is not None:
+            consumed.add(key)
+            return relative, DateConfidence.APPROXIMATE, f"relative:{key}"
+        if confidence is None:
+            confidence = DateConfidence.UNKNOWN
+            source = key
+    return None, confidence, source
+
+
 # --------------------------------------------------------------------------- normalizers
 
 def normalize_source(
@@ -161,16 +224,23 @@ def normalize_source(
     if snippet is None and content:
         snippet = " ".join(content.split())[:SNIPPET_MAX_CHARS]
 
-    published_at = None
-    for key in ("published_at", "published_date"):
-        value = raw.get(key)
-        if value is None:
-            consumed.add(key)
-            continue
-        published_at = parse_datetime(value)
-        if published_at is not None:
-            consumed.add(key)
-            break
+    date_anchor = retrieved_at or utc_now()
+    published_at, published_confidence, published_source = _extract_date_field(
+        raw, ("published_at", "published_date"), anchor=date_anchor, consumed=consumed,
+    )
+    updated_at, updated_confidence, updated_source = _extract_date_field(
+        raw, ("updated_at", "updated_date", "last_updated", "modified_at"),
+        anchor=date_anchor, consumed=consumed,
+    )
+    # The freshness reference prefers "last updated" over "published" (P1.2); its
+    # confidence/source describe whichever field that reference came from.
+    if updated_at is not None:
+        date_confidence, date_source = updated_confidence, updated_source
+    elif published_at is not None:
+        date_confidence, date_source = published_confidence, published_source
+    else:
+        date_confidence = updated_confidence or published_confidence
+        date_source = updated_source or published_source
 
     metadata = {str(k): v for k, v in raw.items() if k not in consumed}
     extra: dict[str, Any] = {"retrieved_at": retrieved_at} if retrieved_at else {}
@@ -181,6 +251,9 @@ def normalize_source(
             url=url,
             author=author,
             published_at=published_at,
+            updated_at=updated_at,
+            date_confidence=date_confidence,
+            date_source=date_source,
             snippet=snippet,
             content=content,
             provider=provider,

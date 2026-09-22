@@ -27,10 +27,12 @@ from research_app.domain.enums import (
     CriticIssueKind,
     CriticSeverity,
     CriticVerdict,
+    DateConfidence,
     GapKind,
     QueryIntent,
     ResultStatus,
     RunStatus,
+    SourceFreshnessStatus,
     SourceIntent,
     SourceType,
     TaskStatus,
@@ -175,6 +177,14 @@ class SourceDocument(DomainModel):
     domain: Optional[str] = None  # derived from the URL when omitted
     author: Optional[str] = None
     published_at: Optional[UtcDatetime] = None
+    # P1.2: a date distinct from publication (last-updated / commit / release date), when the
+    # provider distinguishes it. ``date_confidence``/``date_source`` describe whichever of
+    # ``updated_at``/``published_at`` is used as the freshness reference (updated_at wins when
+    # both are present -- see ``agent.temporal.evaluate_source_freshness``).
+    updated_at: Optional[UtcDatetime] = None
+    date_confidence: Optional[DateConfidence] = None
+    date_source: Optional[str] = None  # raw field name (or "relative:<field>") the date came from
+    freshness_status: Optional[SourceFreshnessStatus] = None  # set by freshness evaluation, not at normalization
     retrieved_at: UtcDatetime = Field(default_factory=utc_now)
     # Provenance (Phase 3): who returned this and the URL exactly as they returned it.
     # ``source_type``, ``query``/``task_id`` and ``retrieved_at`` cover the rest.

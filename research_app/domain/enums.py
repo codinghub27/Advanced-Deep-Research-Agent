@@ -126,3 +126,33 @@ class RetrievalMode(str, Enum):
     DENSE = "dense"
     SPARSE = "sparse"
     HYBRID = "hybrid"
+
+
+class FreshnessCategory(str, Enum):
+    """How a request's answer depends on today's date (P1.1). Extends, and is evaluated
+    alongside, ``agent.temporal.is_time_sensitive`` rather than replacing it."""
+    STABLE = "stable"
+    CURRENT_INFORMATION = "current_information"
+    RECENT = "recent"
+    AS_OF_DATE = "as_of_date"
+    VERSION_DEPENDENT = "version_dependent"
+    HISTORICAL = "historical"
+    UNKNOWN = "unknown"
+
+
+class DateConfidence(str, Enum):
+    """How a ``SourceDocument`` date was obtained (P1.2). ``UNKNOWN`` means a raw date value
+    was present but could not be trusted (kept in ``metadata`` verbatim, never invented)."""
+    EXACT = "exact"
+    APPROXIMATE = "approximate"
+    UNKNOWN = "unknown"
+
+
+class SourceFreshnessStatus(str, Enum):
+    """A source's freshness, evaluated against a ``FreshnessPolicy`` (P1.2/P1.3), never
+    against one global threshold. ``UNKNOWN`` when no date is available at all."""
+    FRESH = "fresh"
+    STALE = "stale"
+    UNKNOWN = "unknown"
+    FUTURE_INVALID = "future_invalid"
+    DATE_CONFLICT = "date_conflict"

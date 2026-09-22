@@ -15,10 +15,13 @@ from __future__ import annotations
 
 import os
 import re
-from datetime import date, datetime, timezone
+from dataclasses import dataclass
+from datetime import date, datetime, timedelta, timezone
 from typing import Mapping, Optional
 
 from research_app.conversation.settings import read_bool
+from research_app.domain.enums import FreshnessCategory, SourceFreshnessStatus
+from research_app.domain.models import SourceDocument, utc_now
 
 
 def today(now: Optional[datetime] = None) -> date:
@@ -102,3 +105,163 @@ def recency_params(question: str, understanding: Optional[Mapping] = None, *,
     if _NEWS.search(text):
         params["topic"] = "news"
     return params
+
+
+# --------------------------------------------------------------------------- freshness policy (P1.1)
+
+_VERSION_CUE = re.compile(
+    r"\b(version|changelog|release notes?|migrate|migration|upgrade|deprecated|"
+    r"what changed|breaking changes?)\b", re.I)
+_HISTORICAL_CUE = re.compile(
+    r"\b(history of|historical(?:ly)?|originally|used to be|in the (?:19|20)\d0s)\b", re.I)
+_AS_OF_CUE = re.compile(r"\bas of\b", re.I)
+
+
+@dataclass(frozen=True)
+class FreshnessPolicy:
+    """A request's freshness requirement (P1.1): category plus the usage decisions that
+    follow from it. Pure data -- nothing here reads the cache, Qdrant or a search tool;
+    callers (semantic_cache_node, the RAG gate, synthesis/critic) decide what to do with it.
+    ``assumption`` is set only when the category was ambiguous and a safer default was chosen,
+    so callers can disclose it (CLAUDE.md P1: "For ambiguous cases ... disclose the assumption")."""
+
+    category: FreshnessCategory
+    reason: str
+    cutoff_date: Optional[date] = None
+    preferred_window_days: Optional[int] = None
+    cache_allowed: bool = True
+    rag_allowed: bool = True
+    live_search_required: bool = False
+    official_verification_required: bool = False
+    assumption: Optional[str] = None
+
+
+def _extract_cutoff_year(text: str, *, now: Optional[datetime] = None) -> Optional[date]:
+    match = _YEAR.search(text)
+    if not match:
+        return None
+    year = int(match.group(0))
+    if year > today(now).year:
+        return None  # never accept a future cutoff from a misparse; no invented date
+    return date(year, 1, 1)
+
+
+def classify_freshness(
+    question: str,
+    understanding: Optional[Mapping] = None,
+    *,
+    is_documentation_query: bool = False,
+    now: Optional[datetime] = None,
+) -> FreshnessPolicy:
+    """Explicit freshness category and usage policy for one request. Extends
+    ``is_time_sensitive`` (still called, unchanged, below) rather than replacing it -- the
+    recent/current split reuses the exact same wording regexes and model judgement.
+
+    ``is_documentation_query`` should be the existing docs-intent detector's result
+    (``sources.official_docs.detector.detect_docs_intent``) when the caller already has it,
+    so a bare mention of the word "version" only becomes VERSION_DEPENDENT alongside a real
+    registered technology, not any stray use of the word.
+    """
+    text = _text(question, (understanding or {}).get("resolved_query"))
+
+    if _VERSION_CUE.search(text) and is_documentation_query:
+        return FreshnessPolicy(
+            category=FreshnessCategory.VERSION_DEPENDENT,
+            reason="version/changelog/migration wording on a documentation question",
+            cache_allowed=False,
+            rag_allowed=True,
+            live_search_required=True,
+            official_verification_required=True,
+        )
+    if _HISTORICAL_CUE.search(text):
+        return FreshnessPolicy(
+            category=FreshnessCategory.HISTORICAL,
+            reason="explicit historical wording",
+            cache_allowed=True,
+            rag_allowed=True,
+            live_search_required=False,
+            official_verification_required=False,
+        )
+    if is_time_sensitive(question, understanding):
+        is_current = bool(
+            _SHORT.search(text) or _MEDIUM.search(text)
+            or (understanding or {}).get("time_sensitivity") == "current"
+            or (understanding or {}).get("intent") == "current_events"
+        )
+        if is_current:
+            return FreshnessPolicy(
+                category=FreshnessCategory.CURRENT_INFORMATION,
+                reason="today/this-week/current wording or model-judged current intent",
+                preferred_window_days=7,
+                cache_allowed=False,
+                rag_allowed=False,
+                live_search_required=True,
+                official_verification_required=False,
+            )
+        return FreshnessPolicy(
+            category=FreshnessCategory.RECENT,
+            reason="latest/recent/trending wording or model-judged recent intent",
+            preferred_window_days=30,
+            cache_allowed=False,
+            rag_allowed=False,
+            live_search_required=True,
+            official_verification_required=False,
+        )
+    if _AS_OF_CUE.search(text):
+        cutoff = _extract_cutoff_year(text, now=now)
+        return FreshnessPolicy(
+            category=FreshnessCategory.AS_OF_DATE,
+            reason="explicit as-of wording",
+            cutoff_date=cutoff,
+            cache_allowed=False,
+            rag_allowed=True,
+            live_search_required=True,
+            official_verification_required=True,
+        )
+    if not text.strip():
+        return FreshnessPolicy(
+            category=FreshnessCategory.UNKNOWN,
+            reason="no question text to classify",
+            cache_allowed=False,
+            rag_allowed=True,
+            live_search_required=False,
+            official_verification_required=False,
+            assumption="empty/unclassifiable question; defaulting to the safer no-cache policy",
+        )
+    return FreshnessPolicy(
+        category=FreshnessCategory.STABLE,
+        reason="no time-sensitive, historical, version or as-of wording detected",
+        cache_allowed=True,
+        rag_allowed=True,
+        live_search_required=False,
+        official_verification_required=False,
+    )
+
+
+def evaluate_source_freshness(
+    source: SourceDocument,
+    policy: FreshnessPolicy,
+    *,
+    now: Optional[datetime] = None,
+) -> SourceFreshnessStatus:
+    """One source's freshness, evaluated against ``policy`` -- the request's own freshness
+    requirement, never one global threshold (CLAUDE.md P1.3). Never invents a date: a source
+    with neither ``published_at`` nor ``updated_at`` is ``UNKNOWN``, not assumed fresh or stale.
+    """
+    now = now or utc_now()
+    published = source.published_at
+    updated = source.updated_at
+    if published is not None and updated is not None and updated < published - timedelta(days=1):
+        return SourceFreshnessStatus.DATE_CONFLICT
+    reference = updated or published
+    if reference is None:
+        return SourceFreshnessStatus.UNKNOWN
+    if reference > now + timedelta(days=1):
+        return SourceFreshnessStatus.FUTURE_INVALID
+    if policy.preferred_window_days is None:
+        return SourceFreshnessStatus.FRESH
+    age_days = (now - reference).days
+    return (
+        SourceFreshnessStatus.FRESH if age_days <= policy.preferred_window_days
+        else SourceFreshnessStatus.STALE
+    )
