@@ -67,7 +67,8 @@ class MigrationTests(unittest.TestCase):
         upgrade_to_head(engine)
         upgrade_to_head(engine)
         with engine.connect() as c:
-            self.assertEqual(c.execute(text("select version_num from alembic_version")).scalar(), "0002_conversations")
+            # P1.5 added migration 0003_evidence_claims on top of Phase 6's 0002_conversations.
+            self.assertEqual(c.execute(text("select version_num from alembic_version")).scalar(), "0003_evidence_claims")
 
     def test_downgrade_removes_only_the_phase6_objects(self):
         engine = memory_engine()
@@ -504,6 +505,12 @@ class CacheTests(unittest.TestCase):
         vectordb.store_cache("deploy it", "somebody else's answer about deploying something " * 3)
         out = st.semantic_cache_node({"question": "deploy it", "conversation_context": self.context()})
         self.assertFalse(out["cache_hit"])
+
+    def test_a_self_contained_repeat_still_hits_the_cache_mid_conversation(self):
+        answer = "FastAPI installs with pip [1]. " * 3
+        vectordb.store_cache("How do I install FastAPI?", answer)
+        out = st.semantic_cache_node({"question": "How do I install FastAPI?", "conversation_context": self.context()})
+        self.assertTrue(out["cache_hit"])
 
     def test_an_empty_history_still_hits_the_cache_and_returns_the_citations(self):
         answer = "FastAPI installs with pip [1]. " * 3

@@ -6,8 +6,8 @@ evidence, provider-failure visibility, minimum security hardening). This is a se
 document, not a renumbering of `PHASE-01`..`PHASE-19`; those keep their own status.
 
 ## Status
-In Progress — P1.1, P1.2, P1.4 and P1.6 implemented and verified (681/681 offline tests, 0
-pyright errors on touched files). P1.3, P1.5, P1.7–P1.14 not started.
+In Progress — P1.1, P1.2, P1.4, P1.5 and P1.6 implemented and verified (691/691 offline tests, 0
+pyright errors on touched files). P1.3, P1.7–P1.14 not started.
 
 ## Goal
 See the accepted P1 directive (approved by the user). Summary: freshness classification and date
@@ -32,6 +32,11 @@ GitHub, Reddit, the hybrid RAG pipeline, or the LangGraph structure).
   `ClaimType`/`ClaimSupportStatus`/`ClaimVerificationStatus` (`domain/enums.py`); `Citation`
   gains a stable `citation_id` (distinct from the renumberable `marker`) for a claim to
   reference; `ResearchRun.claims` added.
+- **P1.5 — Minimal durable evidence persistence**: Alembic migration `0003_evidence_claims`
+  (revises `0002_conversations`) adding `research_evidence` (every source collected for a turn,
+  cited or rejected, with P1.2/P1.4 metadata attached) and `research_claims` (mirrors `Claim`).
+  `db/conversations.py:save_turn()` gains optional `evidence=`/`claims=` kwargs, with loaders
+  `load_evidence()`/`load_claims()`.
 
 ## Out of Scope (this update)
 - P1.3 (wiring the freshness policy into `semantic_cache_node`/the RAG gate — the cache and RAG
@@ -44,7 +49,11 @@ GitHub, Reddit, the hybrid RAG pipeline, or the LangGraph structure).
 - Nothing yet *builds* a `Claim` from a real synthesized answer. `synthesis.py`'s marker-finding
   code (`_citation`, Phase 6) is unchanged; extracting claims from the model's free text is
   P1.7/P1.8 work, once citation verification exists to feed `support_status`/`verification_status`.
-- P1.5, P1.7, P1.10–P1.14, and anything in CLAUDE.md Phases 8–19.
+- Nothing yet *calls* `save_turn(..., evidence=, claims=)` from the live route layer
+  (`research_service.py`). The schema and CRUD are ready and tested against real SQLite rows;
+  wiring the call happens once P1.7/P1.8 actually produce evidence/claim data to pass in --
+  calling it now would only ever persist empty lists.
+- P1.7, P1.10–P1.14, and anything in CLAUDE.md Phases 8–19.
 
 ## Current Implementation
 Before this update: only `agent/temporal.py:is_time_sensitive` existed (a boolean, no category);
@@ -139,15 +148,41 @@ one claim can be flagged stale even if the overall run is not), `conflict_status
 to, since `Citation.marker` is renumbered by synthesis (Phase 6) and is not a durable key.
 `ResearchRun.claims: list[Claim]` added alongside the existing `citations`/`evidence` lists.
 
+### Evidence/claim persistence (P1.5)
+No separate "research_runs" table: `research_conversations.id` (Phase 6, one row per turn)
+already *is* the run id both new tables reference.
+
+- `research_evidence`: one row per source collected for a turn, cited or not. Columns mirror
+  `SourceDocument` (P1.2's `published_at`/`content_updated_at`/`date_confidence`/`date_source`/
+  `freshness_status`, P1.4's `content_classification`/`classification_confidence`/
+  `authority_level`/`is_primary_source`/`independently_verified`), plus `included` (bool) and
+  `rejection_reason` (text) so accepted and rejected sources live in one auditable table instead
+  of two.
+- `research_claims`: one row per `Claim` (P1.6), same fields, `evidence_ids`/`source_ids`/
+  `excerpts` as JSON lists of domain-level string ids (not `research_evidence.id` foreign keys --
+  those ids are stable across runs, DB primary keys are not meaningful across them).
+- `db/conversations.py`: `save_turn(..., evidence=(), claims=())` -- both new kwargs default to
+  empty and are additive; every existing caller (Phase 6, unchanged) keeps working exactly as
+  before. `_build_evidence`/`_build_claim` convert a plain mapping (what a pipeline node would
+  produce) into the ORM row, reusing `_naive_utc` for date fields exactly like citations already
+  do. `load_evidence()`/`load_claims()` read them back, retrieval order.
+- Cascade: deleting a session deletes its conversations (existing), which deletes their evidence
+  and claims (new `cascade="all, delete-orphan"` relationships) -- no orphaned rows.
+
 ## Files Changed
 - **Modified:** `research_app/domain/enums.py`, `research_app/domain/models.py`,
   `research_app/domain/__init__.py`, `research_app/sources/normalizer.py`,
-  `research_app/agent/temporal.py`, `tests/test_domain_isolation.py` (+1 module in the
-  sources-package isolation check, no behavior change).
-- **Created:** `research_app/sources/classification.py`, `tests/test_date_freshness.py`,
-  `tests/test_content_classification.py`, `tests/test_claim_model.py`, this document.
-- **Not touched:** `agent/state.py`, `agent/graph.py`, `main.py`, `db/*`, `rag/*`, any prompt,
-  any existing test file's assertions (all existing tests pass unchanged).
+  `research_app/agent/temporal.py`, `research_app/db/models.py`, `research_app/db/conversations.py`,
+  `tests/test_domain_isolation.py` (+1 module in the sources-package isolation check, no behavior
+  change), `tests/test_p6_conversation.py` (pinned head-revision string updated from
+  `0002_conversations` to `0003_evidence_claims`, same pattern as `test_domain_isolation`'s
+  node-set snapshot -- no behavioral change, just the new expected value).
+- **Created:** `research_app/sources/classification.py`,
+  `research_app/db/migrations/versions/0003_evidence_claims.py`, `tests/test_date_freshness.py`,
+  `tests/test_content_classification.py`, `tests/test_claim_model.py`,
+  `tests/test_p1_evidence_persistence.py`, this document.
+- **Not touched:** `agent/state.py`, `agent/graph.py`, `main.py`, `research_service.py`, `rag/*`,
+  any prompt, any existing test file's assertions besides the one pinned revision string above.
 
 ## Architecture Decisions
 - **`classify_freshness`/`evaluate_source_freshness` live in `agent/temporal.py`**, not in
@@ -222,28 +257,32 @@ missing publication date) against a live server.
 
 ## Commands Run
 ```text
-PYTHONDONTWRITEBYTECODE=1 .venv/Scripts/python -W ignore -m unittest discover -s tests -t .   # 620 OK (baseline, dirty tree) -> 650 OK (P1.1/P1.2) -> 668 OK (P1.4) -> 681 OK (P1.6)
-npx -y pyright --pythonpath .venv/Scripts/python.exe research_app/domain/enums.py research_app/domain/models.py research_app/domain/__init__.py research_app/sources/normalizer.py research_app/agent/temporal.py research_app/sources/classification.py tests/test_content_classification.py tests/test_claim_model.py   # 0 errors
+PYTHONDONTWRITEBYTECODE=1 .venv/Scripts/python -W ignore -m unittest discover -s tests -t .   # 620 OK (baseline, dirty tree) -> 650 OK (P1.1/P1.2) -> 668 OK (P1.4) -> 681 OK (P1.6) -> 691 OK (P1.5)
+npx -y pyright --pythonpath .venv/Scripts/python.exe research_app/domain/enums.py research_app/domain/models.py research_app/domain/__init__.py research_app/sources/normalizer.py research_app/agent/temporal.py research_app/sources/classification.py research_app/db/models.py research_app/db/conversations.py research_app/db/migrations/versions/0003_evidence_claims.py tests/test_content_classification.py tests/test_claim_model.py tests/test_p1_evidence_persistence.py   # 0 errors
 ```
 
 ## Test Results
-- New: `tests/test_date_freshness.py` (30 tests: freshness classification, per-source evaluation,
-  relative-date parsing, normalizer date extraction incl. an explicit equivalence test that a
-  result with no date fields normalizes exactly as before this change), `tests/test_content_classification.py`
-  (18 tests: each `source_type` branch, the www-stripping domain match, the preprint/peer-review
-  distinction, the "no metadata → don't upgrade" guard, and a purity test that `classify_content`
-  doesn't mutate the input or any unrelated field), and `tests/test_claim_model.py` (13 tests: safe
-  defaults, validation of empty text/unknown fields/out-of-range strength, every `ClaimType`/
-  `ClaimSupportStatus` value is constructible, `Citation.citation_id` is stable and distinct
-  per-instance, `ResearchRun.claims` round-trips).
-- Full suite: **681/681 pass** (620 pre-existing incl. the dirty working tree at session start,
-  +30 P1.1/P1.2, +18 P1.4, +13 P1.6). `test_domain_isolation` (extended, still green),
+- New: `tests/test_date_freshness.py` (30 tests), `tests/test_content_classification.py`
+  (18 tests), `tests/test_claim_model.py` (13 tests: safe defaults, validation of empty
+  text/unknown fields/out-of-range strength, every `ClaimType`/`ClaimSupportStatus` value is
+  constructible, `Citation.citation_id` is stable and distinct per-instance, `ResearchRun.claims`
+  round-trips), and `tests/test_p1_evidence_persistence.py` (10 tests: migration `0003` runs
+  cleanly and idempotently on an empty DB, downgrade removes the new tables, `save_turn` persists
+  evidence+claims with all P1.2/P1.4 fields intact, included-vs-rejected evidence is
+  distinguished, cascade delete removes evidence/claims with their session, unparseable/missing
+  dates land as `NULL` not an invented value, and a backward-compatibility test that `save_turn`
+  without `evidence=`/`claims=` behaves exactly as every existing Phase 6 caller expects).
+- Full suite: **691/691 pass** (620 pre-existing incl. the dirty working tree at session start,
+  +30 P1.1/P1.2, +18 P1.4, +13 P1.6, +10 P1.5). `test_domain_isolation` (extended, still green),
   `test_domain_models`, and `test_source_normalizer` (the Phase 3 pinned equivalence test) all
-  still pass.
-- Pyright on all touched/created source and test files: 0 errors, 0 warnings (two incidental
-  `Score`-vs-`float` comparison errors in an earlier test file were fixed with an explicit
-  `float(...)` cast; two pre-existing `BaseRoute.path` errors in `test_domain_isolation.py`,
-  unrelated to the lines this update touched there, are untouched baseline noise).
+  still pass. One pre-existing pinned test (`test_p6_conversation.py`'s migration-head check) was
+  updated from `0002_conversations` to `0003_evidence_claims` -- the new expected head revision,
+  not a behavior change (same pattern as `test_domain_isolation`'s node-set snapshot).
+- Pyright on all touched/created source and test files: 0 errors, 0 warnings (a few incidental
+  `Score`/`Optional[float]`-vs-`float` comparison errors in test files were fixed with explicit
+  `float(...)` casts; two pre-existing `BaseRoute.path` errors in `test_domain_isolation.py` and
+  several pre-existing `ResearchState`-partial-dict errors in `test_p6_conversation.py`, unrelated
+  to the lines this update touched, are untouched baseline noise).
 
 ## Known Issues
 - **Not yet load-bearing.** Nothing in the running graph calls `classify_freshness`,
@@ -277,6 +316,10 @@ npx -y pyright --pythonpath .venv/Scripts/python.exe research_app/domain/enums.p
   news domain's subdomain, or a paper mirrored off its recognised venue, is not detected.
 - **`Claim` is an empty shape with nothing populating it.** No code anywhere constructs a `Claim`
   from a real research run yet; `ResearchRun.claims` will be `[]` for every run until P1.7/P1.8.
+- **`save_turn(evidence=, claims=)` is not called anywhere live.** Schema, ORM models and CRUD
+  are complete and tested against real SQLite rows, but `research_service.py` never passes these
+  kwargs, so every `research_evidence`/`research_claims` table stays empty until P1.7/P1.8 wire
+  a real call. No fine-grained per-provider status table yet either (P1.10).
 - Carried over from Phase 7 (untouched by this slice): `SOURCE_RAG_ENABLED=false` (not
   production-ready), PostgreSQL path only manually verified once, `.env.example` still not
   updated for Phase 7's RAG variables (blocked by session permissions in that earlier session).
@@ -284,15 +327,16 @@ npx -y pyright --pythonpath .venv/Scripts/python.exe research_app/domain/enums.p
 ## Git Commit
 - `1e6d3ec` — p1.1-p1.2: freshness classification and date extraction/normalization
 - `b148901` — p1.4: source-type (content) classification
-- Pending — recommended message: `p1.6: claim/evidence domain model`. (Per CLAUDE.md Rule 4, one
-  architectural change per commit; each P1 sub-part above is its own commit on
-  `phase-7-hybrid-rag`.)
+- `2df7376` — p1.6: claim/evidence domain model
+- Pending — recommended message: `p1.5: minimal durable evidence and claim persistence`. (Per
+  CLAUDE.md Rule 4, one architectural change per commit; each P1 sub-part above is its own commit
+  on `phase-7-hybrid-rag`.)
 
 ## Next Phase
-P1.5 — minimal durable evidence persistence: Alembic migration adding tables for research runs,
-claims, and per-source-outcome records, reusing the `Claim`/`RoutingDecision`/`SourceOutcome`
-shapes now in place. This is the first step in this initiative that touches the database schema
-and is a heavier, separate change from the pure-domain-model slices above; it should get its own
-careful review of migration ordering against `0001_baseline`/`0002_conversations`. Then P1.7
-(citation verification), which needs both P1.5's persistence and P1.6's claim model to record its
-findings against.
+P1.7 — citation verification: for each citation, check the source was retrieved this run, the
+excerpt exists and supports the claim, the claim isn't stronger than the evidence, the source
+type/date satisfy the freshness requirement, and the same source isn't reused to fake evidence
+diversity. This is the first sub-phase that actually *builds* `Claim` rows from a real answer and
+is the natural point to wire `save_turn(evidence=, claims=)` into the live route layer. P1.3
+(wiring `classify_freshness`/`evaluate_source_freshness` into the cache and RAG gates) and P1.8/
+P1.9 (synthesis/critic reading `authority_level`/`content_classification`) remain open alongside it.

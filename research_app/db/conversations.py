@@ -15,7 +15,14 @@ from sqlalchemy import func
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
-from research_app.db.models import ResearchCitation, ResearchConversation, Session as ChatSession, _utc_now
+from research_app.db.models import (
+    ResearchCitation,
+    ResearchClaim,
+    ResearchConversation,
+    ResearchEvidence,
+    Session as ChatSession,
+    _utc_now,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -90,6 +97,26 @@ def load_all_turns(db: Session, session_id: int) -> list[ResearchConversation]:
     )
 
 
+def load_evidence(db: Session, conversation_id: "uuid.UUID | str") -> list[ResearchEvidence]:
+    """All evidence collected for a turn (P1.5), cited and rejected alike, retrieval order."""
+    return (
+        db.query(ResearchEvidence)
+        .filter(ResearchEvidence.conversation_id == conversation_id)
+        .order_by(ResearchEvidence.created_at.asc())
+        .all()
+    )
+
+
+def load_claims(db: Session, conversation_id: "uuid.UUID | str") -> list[ResearchClaim]:
+    """Every claim recorded for a turn (P1.5/P1.6), in the order they were saved."""
+    return (
+        db.query(ResearchClaim)
+        .filter(ResearchClaim.conversation_id == conversation_id)
+        .order_by(ResearchClaim.created_at.asc())
+        .all()
+    )
+
+
 # --------------------------------------------------------------------------- writing
 
 def _naive_utc(value: Any) -> Optional[datetime]:
@@ -106,8 +133,60 @@ def _naive_utc(value: Any) -> Optional[datetime]:
     return value
 
 
-def _build_turn(session_id: int, turn_number: int, data: Mapping[str, Any],
-                citations: Sequence[Mapping[str, Any]]) -> ResearchConversation:
+def _build_evidence(item: Mapping[str, Any]) -> ResearchEvidence:
+    """One ``ResearchEvidence`` row from an evidence-item mapping. Field names match the
+    domain ``SourceDocument`` (P1.2/P1.4) plus ``included``/``rejection_reason`` (P1.5)."""
+    return ResearchEvidence(
+        task_id=item.get("task_id"),
+        query=item.get("query"),
+        source_id=item.get("source_id"),
+        source_type=str(item.get("source_type") or "web")[:32],
+        provider=item.get("provider"),
+        url=item.get("url") or "",
+        domain=(item.get("domain") or "")[:255],
+        title=item.get("title") or "",
+        excerpt=item.get("excerpt") or item.get("snippet") or "",
+        published_at=_naive_utc(item.get("published_at")),
+        content_updated_at=_naive_utc(item.get("updated_at")),
+        date_confidence=item.get("date_confidence"),
+        date_source=item.get("date_source"),
+        freshness_status=item.get("freshness_status"),
+        content_classification=item.get("content_classification"),
+        classification_confidence=item.get("classification_confidence"),
+        authority_level=item.get("authority_level"),
+        is_primary_source=item.get("is_primary_source"),
+        independently_verified=bool(item.get("independently_verified", False)),
+        included=bool(item.get("included", True)),
+        rejection_reason=item.get("rejection_reason"),
+        retrieved_at=_naive_utc(item.get("retrieved_at")),
+    )
+
+
+def _build_claim(item: Mapping[str, Any]) -> ResearchClaim:
+    """One ``ResearchClaim`` row from a claim mapping, mirroring the domain ``Claim`` (P1.6)."""
+    return ResearchClaim(
+        claim_text=item.get("text") or item.get("claim_text") or "",
+        claim_type=str(item.get("claim_type") or "fact")[:32],
+        support_status=str(item.get("support_status") or "unsupported")[:32],
+        evidence_ids=list(item.get("evidence_ids") or []),
+        source_ids=list(item.get("source_ids") or []),
+        excerpts=list(item.get("excerpts") or []),
+        citation_id=item.get("citation_id"),
+        evidence_strength=item.get("evidence_strength"),
+        freshness_status=item.get("freshness_status"),
+        conflict_status=bool(item.get("conflict_status", False)),
+        verification_status=str(item.get("verification_status") or "unverified")[:16],
+    )
+
+
+def _build_turn(
+    session_id: int,
+    turn_number: int,
+    data: Mapping[str, Any],
+    citations: Sequence[Mapping[str, Any]],
+    evidence: Sequence[Mapping[str, Any]] = (),
+    claims: Sequence[Mapping[str, Any]] = (),
+) -> ResearchConversation:
     conversation = ResearchConversation(
         id=data.get("id") or uuid.uuid4(),
         session_id=session_id,
@@ -133,6 +212,10 @@ def _build_turn(session_id: int, turn_number: int, data: Mapping[str, Any],
             snippet=item.get("snippet") or "",
             retrieved_at=_naive_utc(item.get("retrieved_at")),
         ))
+    for item in evidence:
+        conversation.evidence.append(_build_evidence(item))
+    for item in claims:
+        conversation.claims.append(_build_claim(item))
     return conversation
 
 
@@ -143,12 +226,15 @@ def save_turn(
     turn_number: int,
     data: Mapping[str, Any],
     citations: Sequence[Mapping[str, Any]] = (),
+    evidence: Sequence[Mapping[str, Any]] = (),
+    claims: Sequence[Mapping[str, Any]] = (),
 ) -> ResearchConversation:
-    """Store one turn and its citations. ``turn_number`` was chosen when the request began; if
-    another request took it meanwhile (UNIQUE violation) the next free number is used, once.
-    Raises on any other failure; callers log it (a failed save never fails the response)."""
+    """Store one turn, its citations, and (P1.5) the evidence collected and claims made while
+    answering it. ``turn_number`` was chosen when the request began; if another request took it
+    meanwhile (UNIQUE violation) the next free number is used, once. Raises on any other
+    failure; callers log it (a failed save never fails the response)."""
     for attempt in (1, 2):
-        conversation = _build_turn(session_id, turn_number, data, citations)
+        conversation = _build_turn(session_id, turn_number, data, citations, evidence, claims)
         db.add(conversation)
         try:
             session = db.get(ChatSession, session_id)

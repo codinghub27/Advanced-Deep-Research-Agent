@@ -1,8 +1,9 @@
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 from sqlalchemy import (
-Integer,String,DateTime,ForeignKey,JSON,Boolean,Text,Uuid,UniqueConstraint,true
+Integer,String,DateTime,ForeignKey,JSON,Boolean,Float,Text,Uuid,UniqueConstraint,true,false
 )
 from datetime import datetime, timezone
+from typing import Optional
 import uuid
 
 from research_app.db.database import Base
@@ -199,6 +200,16 @@ class ResearchConversation(Base):
         cascade="all, delete-orphan",
         order_by="ResearchCitation.citation_index",
     )
+    evidence=relationship(
+        "ResearchEvidence",
+        back_populates="conversation",
+        cascade="all, delete-orphan",
+    )
+    claims=relationship(
+        "ResearchClaim",
+        back_populates="conversation",
+        cascade="all, delete-orphan",
+    )
 
 
 class ResearchCitation(Base):
@@ -247,4 +258,82 @@ class ResearchCitation(Base):
     conversation=relationship(
         "ResearchConversation",
         back_populates="citations",
+    )
+
+
+class ResearchEvidence(Base):
+    """Every source collected for one turn (P1.5), cited or not. ``included``/
+    ``rejection_reason`` distinguish what the answer used from what was retrieved and dropped.
+    Freshness (P1.2) and content-classification (P1.4) metadata travel with each row so a
+    stored answer can be audited without re-fetching anything."""
+    __tablename__ = "research_evidence"
+    id:Mapped[uuid.UUID]=mapped_column(
+        Uuid,
+        primary_key=True,
+        default=uuid.uuid4,
+    )
+    conversation_id:Mapped[uuid.UUID]=mapped_column(
+        ForeignKey("research_conversations.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+    task_id:Mapped[Optional[str]]=mapped_column(String(64), nullable=True)
+    query:Mapped[Optional[str]]=mapped_column(Text, nullable=True)
+    source_id:Mapped[Optional[str]]=mapped_column(String(64), nullable=True)
+    source_type:Mapped[str]=mapped_column(String(32), nullable=False)
+    provider:Mapped[Optional[str]]=mapped_column(String(64), nullable=True)
+    url:Mapped[str]=mapped_column(Text, nullable=False)
+    domain:Mapped[str]=mapped_column(String(255), nullable=False, default="")
+    title:Mapped[str]=mapped_column(Text, nullable=False, default="")
+    excerpt:Mapped[str]=mapped_column(Text, nullable=False, default="")
+    published_at:Mapped[Optional[datetime]]=mapped_column(DateTime, nullable=True)
+    content_updated_at:Mapped[Optional[datetime]]=mapped_column(DateTime, nullable=True)
+    date_confidence:Mapped[Optional[str]]=mapped_column(String(16), nullable=True)
+    date_source:Mapped[Optional[str]]=mapped_column(String(64), nullable=True)
+    freshness_status:Mapped[Optional[str]]=mapped_column(String(16), nullable=True)
+    content_classification:Mapped[Optional[str]]=mapped_column(String(48), nullable=True)
+    classification_confidence:Mapped[Optional[float]]=mapped_column(Float, nullable=True)
+    authority_level:Mapped[Optional[str]]=mapped_column(String(16), nullable=True)
+    is_primary_source:Mapped[Optional[bool]]=mapped_column(Boolean, nullable=True)
+    independently_verified:Mapped[bool]=mapped_column(Boolean, nullable=False, default=False, server_default=false())
+    included:Mapped[bool]=mapped_column(Boolean, nullable=False, default=True, server_default=true())
+    rejection_reason:Mapped[Optional[str]]=mapped_column(Text, nullable=True)
+    retrieved_at:Mapped[Optional[datetime]]=mapped_column(DateTime, nullable=True)
+    created_at:Mapped[datetime]=mapped_column(DateTime, default=_utc_now)
+    conversation=relationship(
+        "ResearchConversation",
+        back_populates="evidence",
+    )
+
+
+class ResearchClaim(Base):
+    """One claim a turn's answer makes and how well it is backed (P1.5/P1.6), mirroring the
+    domain ``Claim`` model field-for-field. ``evidence_ids``/``source_ids`` reference the
+    domain-level ids (stable across runs), not ``ResearchEvidence.id`` primary keys."""
+    __tablename__ = "research_claims"
+    id:Mapped[uuid.UUID]=mapped_column(
+        Uuid,
+        primary_key=True,
+        default=uuid.uuid4,
+    )
+    conversation_id:Mapped[uuid.UUID]=mapped_column(
+        ForeignKey("research_conversations.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+    claim_text:Mapped[str]=mapped_column(Text, nullable=False)
+    claim_type:Mapped[str]=mapped_column(String(32), nullable=False, default="fact")
+    support_status:Mapped[str]=mapped_column(String(32), nullable=False, default="unsupported")
+    evidence_ids:Mapped[list]=mapped_column(JSON, nullable=False, default=list)
+    source_ids:Mapped[list]=mapped_column(JSON, nullable=False, default=list)
+    excerpts:Mapped[list]=mapped_column(JSON, nullable=False, default=list)
+    citation_id:Mapped[Optional[str]]=mapped_column(String(64), nullable=True)
+    evidence_strength:Mapped[Optional[float]]=mapped_column(Float, nullable=True)
+    freshness_status:Mapped[Optional[str]]=mapped_column(String(16), nullable=True)
+    conflict_status:Mapped[bool]=mapped_column(Boolean, nullable=False, default=False, server_default=false())
+    verification_status:Mapped[str]=mapped_column(String(16), nullable=False, default="unverified")
+    created_at:Mapped[datetime]=mapped_column(DateTime, default=_utc_now)
+    conversation=relationship(
+        "ResearchConversation",
+        back_populates="claims",
     )
