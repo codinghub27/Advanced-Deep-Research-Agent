@@ -17,6 +17,7 @@ from dataclasses import dataclass, field
 from typing import Iterable, Optional, Sequence
 
 import research_app.agent.state as st
+from research_app.agent import temporal
 from research_app.agent.pipeline.evidence import EvidencePool
 from research_app.domain import (
     Citation,
@@ -173,9 +174,16 @@ def _subquestion_lines(pool: EvidencePool, sources: Sequence[NumberedSource]) ->
     return "\n".join(lines)
 
 
+def _published(source: NumberedSource) -> str:
+    """" (published 2026-03-02)" when a source says when it was published, so the model can tell
+    a fresh source from an old one."""
+    dates = [d.published_at for d in source.documents if d.published_at]
+    return f" (published {max(dates).date().isoformat()})" if dates else ""
+
+
 def build_prompt(question: str, original: str, sources: Sequence[NumberedSource], pool: EvidencePool,
                  context, feedback: str = "") -> str:
-    blocks = "\n\n".join(f"[{s.index}] {s.label}\n{s.url}\n{s.content}" for s in sources)
+    blocks = "\n\n".join(f"[{s.index}] {s.label}{_published(s)}\n{s.url}\n{s.content}" for s in sources)
     wording = f"\n(The user's original wording: {original})" if original and original != question else ""
     conversation = st._conversation_block(context)
     if conversation:
@@ -184,6 +192,8 @@ def build_prompt(question: str, original: str, sources: Sequence[NumberedSource]
     review = (f"\nA REVIEWER FOUND THESE PROBLEMS WITH A PREVIOUS ANSWER; do not repeat them: {feedback}\n"
               if feedback else "")
     return f"""Write a clear, well-organised answer to the question, using ONLY the numbered sources below.
+
+{temporal.date_line()}
 
 QUESTION: {question}{wording}
 {review}
@@ -197,6 +207,7 @@ RULES:
 - Use only the sources above. Do not add facts from memory. If the sources do not cover part of the question, say so plainly instead of guessing.
 - Cite every factual claim with the number of the source that supports it, at the end of the sentence or bullet: [1], or [1][3] for several. Never put a citation inside a code block. Never cite a number that is not listed above.
 - Source authority: official documentation is the highest authority for installation, API, configuration and version facts; GitHub is implementation evidence; Reddit is community experience; web is general information. If sources conflict on a technical fact, prefer official documentation over web over GitHub/Reddit, and mention the conflict.
+- Freshness: judge every source against today's date above. For questions about the latest, current or recent state of something, lead with the newest sources; when a source is dated or clearly old, say how old it is instead of presenting it as current, and never call something "the latest" unless a source supports it. If the sources only cover earlier years, say that plainly.
 - Structure the answer naturally (headings, lists and tables only where they help). Put code in fenced code blocks. No raw URLs in the text. No title line that repeats the question.
 
 Write the answer now:"""
@@ -232,10 +243,13 @@ def _no_evidence_answer(missed: Sequence[str]) -> str:
     return text + "\n\nTry rephrasing the question or making it more specific."
 
 
+def _source_lines(sources: Sequence[NumberedSource]) -> str:
+    return "\n".join(f"- {s.title} [{s.index}]" for s in sources[:5])
+
+
 def _source_list_answer(sources: Sequence[NumberedSource]) -> str:
-    lines = "\n".join(f"- {s.title} [{s.index}]" for s in sources[:5])
     return ("I found sources for this question but could not write the summary (the language model "
-            "did not respond). The most relevant ones are:\n\n" + lines)
+            "did not respond). The most relevant ones are:\n\n" + _source_lines(sources))
 
 
 def strip_orphan_markers(text: str, valid: Iterable[int]) -> tuple[str, int]:
@@ -297,10 +311,19 @@ async def run_synthesis(state) -> SynthesisResult:
         reply = await st.llm_groq.ainvoke(prompt)
         raw = reply.content if isinstance(reply.content, str) else str(reply.content)
         text, citations = finish_answer(raw, sources)
-        if len(text) < 50:
-            raise ValueError("answer too short")
+        if not text.strip():
+            raise ValueError("the model returned an empty answer")
+        if len(text) < 50 and not citations:
+            # A real but very short reply with no citation, typically "the sources do not cover this"
+            # when the evidence is off-topic. It is an answer, not a failure: keep it, list the sources.
+            # (A short reply that cites a source is simply a short answer.)
+            logger.warning("Synthesis returned a very short answer (%d chars): %r; keeping it", len(text), text[:80])
+            fallback = True
+            text, citations = finish_answer(f"{text}\n\nSources found:\n{_source_lines(sources)}", sources)
     except Exception as exc:
-        logger.warning("Synthesis failed (%s); returning the source list", type(exc).__name__)
+        # The message matters (rate limit, request too large, model error); it holds no secrets.
+        logger.warning("Synthesis failed (%s: %s); returning the source list", type(exc).__name__,
+                       " ".join(str(exc).split())[:300])
         fallback = True
         text = _source_list_answer(sources)
         text, citations = finish_answer(text, sources)

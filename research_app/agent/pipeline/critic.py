@@ -20,6 +20,7 @@ from typing import Optional, Sequence
 from pydantic import BaseModel, Field
 
 import research_app.agent.state as st
+from research_app.agent import temporal
 from research_app.agent.pipeline.evidence import EvidencePool
 from research_app.agent.pipeline.gaps import keyword_query, normalize_query
 from research_app.agent.pipeline.synthesis import (
@@ -135,6 +136,9 @@ def _critic_prompt(question: str, synthesis: SynthesisResult, pool: EvidencePool
         blocks.append(f"[{c.index}] {c.title} ({c.source_type.value})\n{body}")
     subquestions = "\n".join(f"- {t.sub_question}" for t in pool.tasks)
     return f"""You are a strict reviewer of a research answer.
+
+{temporal.date_line()}
+If the answer presents something as the latest or current although the cited sources show it is more than a year old, count that as an unsupported claim.
 
 QUESTION: {question}
 

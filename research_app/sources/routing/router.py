@@ -95,6 +95,21 @@ _ANCHOR_TEXT = _rx(
 _ANCHOR_CLASS = _rx(r"\b[A-Z][A-Za-z]+(?:Error|Exception)\b")  # TypeError, HTTPError (case-sensitive)
 
 
+# "it searches across the web, GitHub and Reddit", "the tool scrapes Reddit": a description of the
+# user's own system, not a request to search those sites. Third-person verbs only, so the
+# imperative "search GitHub and Reddit for ..." still counts.
+_DESCRIBES_A_SYSTEM = _rx(
+    r"\b(?:searches|queries|scrapes|crawls|pulls|fetches|retrieves|gathers|collects|integrates(?: with)?"
+    r"|connects to|reads from|uses|supports|covers)\b[^.!?\n]{0,80}$"
+)
+
+
+def _requested(pattern: "re.Pattern[str]", text: str) -> bool:
+    """Does ``pattern`` match somewhere that is not part of a description of a system?"""
+    return any(not _DESCRIBES_A_SYSTEM.search(text[max(0, m.start() - 100):m.start()])
+               for m in pattern.finditer(text))
+
+
 @dataclass(frozen=True)
 class RouteSignals:
     docs_intent: DocsIntent
@@ -145,9 +160,9 @@ def detect_signals(text: str, docs_settings: DocsSettings) -> RouteSignals:
         docs_intent=detect_docs_intent(raw, registry),
         strong_technologies=tuple(t.id for t in strong),
         any_technology=bool(weak_or_strong),
-        github_explicit=bool(_GITHUB_EXPLICIT.search(normalized)),
+        github_explicit=_requested(_GITHUB_EXPLICIT, normalized),
         code_soft=bool(_CODE_SOFT.search(normalized)),
-        reddit_explicit=bool(_REDDIT_EXPLICIT.search(normalized)),
+        reddit_explicit=_requested(_REDDIT_EXPLICIT, normalized),
         experience=bool(_EXPERIENCE.search(normalized)),
         problems=bool(_PROBLEM_WORD.search(normalized) and _ACTOR.search(normalized)),
         # An error class name (TypeError) is both the cue and the technical anchor.

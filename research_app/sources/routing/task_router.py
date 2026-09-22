@@ -149,6 +149,29 @@ def task_technology(task: ResearchTask, understanding: Any = None) -> Optional[s
     return None
 
 
+def _advice_decision(task: ResearchTask, intent: Optional[SourceIntent], suggestions: list[SourceType],
+                     dropped: list[DroppedSource]) -> RoutingDecision:
+    """Reddit (what people who have been there say) and web (articles, guides). Official
+    documentation and code repositories do not answer "is it worth it"; a suggestion of either is
+    reported as dropped."""
+    origins = {s: ORIGIN_PLANNER if s in suggestions else ORIGIN_POLICY for s in (REDDIT, WEB)}
+    for source in (DOCS, GITHUB):
+        if source in suggestions:
+            dropped.append(DroppedSource(source=source.value, reason="advice_question"))
+    ordered = [s for s in SOURCE_ORDER if s in origins]
+    decision = RoutingDecision(
+        task_id=task.task_id,
+        sub_question=task.sub_question,
+        source_intent=intent or SourceIntent.COMMUNITY_EXPERIENCE,
+        sources=ordered,
+        origins={s.value: origins[s] for s in ordered},
+        dropped=dropped,
+    )
+    logger.info("Task route: %s (advice question)%s", ",".join(decision.names),
+                (" dropped=" + ",".join(f"{d.source}:{d.reason}" for d in dropped)) if dropped else "")
+    return decision
+
+
 def route_task(
     task: ResearchTask,
     understanding: Any = None,
@@ -186,6 +209,13 @@ def route_task(
     # Planner-led: the planner supplied a usable hint. Only then do the enforcement rules and
     # the source cap apply; a task with no hint gets exactly the Phase 5 route.
     planner_led = settings.enabled and (bool(suggestions) or intent is not None)
+
+    # An advice/review question ("is it worth building X? does it help in interviews?"): the
+    # technologies and sites the user names describe THEIR project, they are not the subject.
+    # A sub-question that is itself technical or a documentation lookup is routed as usual.
+    if (settings.enabled and _get(understanding, "intent") == "advice"
+            and intent not in TECHNICAL_INTENTS and not sig.docs_intent.is_documentation_query):
+        return _advice_decision(task, intent, suggestions, dropped)
 
     origins: dict[SourceType, str] = {}
     if not settings.enabled:

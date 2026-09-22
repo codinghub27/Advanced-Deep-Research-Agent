@@ -831,7 +831,8 @@ const ORIGIN_LABEL={planner:'suggested by the planner',policy:'added by the rout
 const DROP_LABEL={non_technical:'not a technical question',over_cap:'over the per-question source limit',
   unknown_source_type:'not a supported source',malformed_source:'not a supported source',unsupported_source_type:'not a supported source',
   technology_not_in_registry:'no official docs registered for this technology',docs_disabled:'official docs are turned off',
-  router_disabled:'the source router is turned off',too_many_suggestions:'too many suggestions'};
+  router_disabled:'the source router is turned off',too_many_suggestions:'too many suggestions',
+  advice_question:'an advice question: documentation and code repositories do not answer it'};
 function routeChip(type,outcome,origin){
   const m=srcMeta(type); let stat='', cls='';
   if(outcome){

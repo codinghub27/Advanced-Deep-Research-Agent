@@ -12,6 +12,7 @@ from langchain_core.messages import HumanMessage
 from langgraph.types import Send
 from research_app.agent.vectordb import get_cache_extras, lookup_cache, store_cache, store_cache_extras
 from langgraph.graph import END
+from research_app.agent import temporal
 from research_app.agent.llms import llm_groq
 from research_app.agent.pipeline.settings import PipelineSettings
 from research_app.domain import (
@@ -172,6 +173,12 @@ def semantic_cache_node(state: ResearchState):
             logger.info("Cache bypassed: the session has earlier turns")
             return {"cache_hit": False, "final_answer": "", "messages": []}
 
+        if temporal.is_time_sensitive(question):
+            # "Latest ..." has a different answer tomorrow. Until the cache carries freshness
+            # metadata (Phase 12), such questions are always researched live.
+            logger.info("Cache bypassed: the question is time-sensitive")
+            return {"cache_hit": False, "final_answer": "", "messages": []}
+
         logger.info(f"Checking cache: '{question[:70]}...'")
         cache_hit, cached_answer = lookup_cache(question)
 
@@ -209,7 +216,7 @@ def cache_router(state: ResearchState):
 
 MAX_RESOLVED_QUERY_CHARS = 500
 _VALID_INTENTS = {"unknown", "factual", "research", "comparison", "technical_howto",
-                  "troubleshooting", "code", "current_events"}
+                  "troubleshooting", "code", "current_events", "advice"}
 _VALID_TIME = {"unknown", "evergreen", "recent", "current"}
 
 
@@ -268,15 +275,18 @@ async def classify_node(state: ResearchState):
         result = await classifier.ainvoke(
             f"""Analyse the user's question.
 
+{temporal.date_line()}
+
 {_conversation_block(context)}Question: {question}
 
 Return ONLY JSON with these fields:
 - is_simple: true only for a single factual answer (e.g. "capital of France?"); false when research is needed (e.g. "best laptops 2026?").
 - is_follow_up: true if the question depends on the conversation above: pronouns (it, that, this, them), an implied subject ("now add authentication"), an explicit return ("going back to FastAPI"), or a comparison ("how does it compare to Django?"). false if it stands on its own or there is no conversation above.
 - resolved_query: the question rewritten so it stands alone, replacing references with what they refer to, using ONLY the conversation above (e.g. "deploy it" after a FastAPI turn -> "deploy FastAPI"). If it is not a follow-up, repeat the question unchanged.
-- intent: one of unknown, factual, research, comparison, technical_howto, troubleshooting, code, current_events.
-- technology: the main technology, library or product the question is about (after resolving references), or "".
-- time_sensitivity: one of unknown, evergreen, recent, current.
+- intent: one of unknown, factual, research, comparison, technical_howto, troubleshooting, code, current_events, advice.
+  Use advice when the user wants a judgment, review, recommendation or career/learning advice about THEIR OWN plan, project or path ("is it worth building", "should I learn", "does it help in interviews", "review my idea", "is this a good project"). A user describing the technologies of their own project does not make it a how-to or documentation question.
+- technology: the main technology, library or product the question is about (after resolving references), or "". For an advice question leave it "": the technologies it names are background, not the subject.
+- time_sensitivity: one of unknown, evergreen, recent, current. Use recent or current whenever the answer changes over time: latest, newest or upcoming things, news, current versions, prices, events, "state of" a field.
 - context_topics: earlier topics the question relies on, or []."""
         )
         understanding = finalize_understanding(result, question, context)
@@ -298,6 +308,17 @@ def classify_router(state: ResearchState):
     return "simple_search_node" if state["is_simple"] else "planner_node"
 
 MAX_WEB_RESULTS = 3  # same cap as TavilySearch(max_results=3) above
+MAX_QUERY_CHARS = 400  # Tavily rejects longer queries
+
+
+def _fit_query(query: str) -> str:
+    """``query`` shortened to what Tavily accepts, at a word boundary. A long pasted question can
+    reach a search unchanged when the planner fails or the question is simple."""
+    query = " ".join(query.split())
+    if len(query) <= MAX_QUERY_CHARS:
+        return query
+    cut = query[:MAX_QUERY_CHARS]
+    return (cut.rsplit(" ", 1)[0] if " " in cut else cut).strip()
 
 
 def _web_search_update(query: str, response, *, content_limit: int, sink: Optional[list] = None) -> dict:
@@ -471,6 +492,7 @@ _SOURCE_INTENT_FOR = {
     "code": SourceIntent.CODE_IMPLEMENTATION,
     "comparison": SourceIntent.COMPARISON,
     "current_events": SourceIntent.CURRENT_EVENTS,
+    "advice": SourceIntent.COMMUNITY_EXPERIENCE,  # what people who have been there say
 }
 
 
@@ -574,6 +596,20 @@ async def _research_update(query: str, *, question: str | None, content_limit: i
     ``task`` (Phase 6) the sub-question is routed by ``route_task`` and the update also carries the
     routing decision with per-source outcomes, and the documents are stamped with the task id."""
     text = question or query
+    query = _fit_query(query)
+    # Real-time research: every web search passes here (main, gap and retry passes). A past year
+    # the model added on its own is refreshed, and a time-sensitive question gets a date filter.
+    recency: dict = {}
+    try:
+        if temporal.is_time_sensitive(text, understanding):
+            refreshed = temporal.refresh_stale_years(query, user_text=" ".join(
+                part for part in (text, (understanding or {}).get("resolved_query")) if part))
+            if refreshed != query:
+                logger.info("Search query used a past year; refreshed %r -> %r", query[:80], refreshed[:80])
+                query = refreshed
+            recency = temporal.recency_params(text, understanding)
+    except Exception as exc:
+        logger.warning("Could not apply the date rules (%s); searching without them", type(exc).__name__)
     decision = None
     docs_selected = False
     if task is None:
@@ -607,9 +643,16 @@ async def _research_update(query: str, *, question: str | None, content_limit: i
     web_ms: Optional[float] = None
     try:
         started = time.perf_counter()
-        results = await _tavily_invoke({"query": query})
+        results = await _tavily_invoke({"query": query, **recency})
         web_ms = (time.perf_counter() - started) * 1000
         update = _web_search_update(query, results, content_limit=content_limit, sink=web_results)
+        if recency and not update["source_documents"]:
+            # Nothing inside the date window (a niche topic): one retry without it beats no answer.
+            logger.info("No results with %s for %r; retrying without the date filter", recency, query[:70])
+            web_results.clear()
+            results = await _tavily_invoke({"query": query})
+            web_ms = (time.perf_counter() - started) * 1000
+            update = _web_search_update(query, results, content_limit=content_limit, sink=web_results)
         if docs_task is not None:
             docs_result = await docs_task
             update = _add_official_docs(update, docs_result, query)
@@ -697,6 +740,37 @@ def tasks_from_plan(result, question: str, technology: Optional[str] = None) -> 
     return tasks or [ResearchTask(sub_question=question, technology=technology or None)]
 
 
+def _refresh_task_years(tasks: list[ResearchTask], user_text: str, understanding: Optional[dict]) -> list[ResearchTask]:
+    """Guard behind the planner prompt: for a time-sensitive question, a past year the planner
+    wrote on its own ("latest AI news 2024" in 2026) becomes the current year. A year the user
+    wrote is kept. Never raises."""
+    try:
+        if not temporal.is_time_sensitive(user_text, understanding):
+            return tasks
+        fixed = []
+        for task in tasks:
+            text = temporal.refresh_stale_years(task.sub_question, user_text=user_text)
+            if text == task.sub_question:
+                fixed.append(task)
+                continue
+            logger.info("Planner query used a past year; refreshed %r -> %r", task.sub_question[:80], text[:80])
+            query = temporal.refresh_stale_years(task.search_query or text, user_text=user_text)
+            fixed.append(task.model_copy(update={"sub_question": text, "search_query": query}))
+        return fixed
+    except Exception as exc:
+        logger.warning("Could not refresh past years in the plan (%s); keeping it as written", type(exc).__name__)
+        return tasks
+
+
+ADVICE_PLANNER_RULES = """RULES FOR THIS ADVICE QUESTION:
+The user wants a judgment, review or career/learning advice about their own plan or project. The technologies and sites they mention describe their project; they are NOT what to research.
+1. Do not plan documentation or GitHub searches, and leave technology empty.
+2. Use source_intent community_experience or general_research, and suggested_sources ["reddit", "web"].
+3. Write each sub-question as a plain-language question a person would put to a forum or a search engine about the decision itself (for example: "is building an LLM research agent a good final-year project for AI students", "do interviewers value RAG and agent projects on a fresher's resume", "how do students get placed in AI roles with GenAI projects"). Do not write lists of technology keywords.
+
+"""
+
+
 def _planner_prompt(question: str, original: str, context, understanding: dict) -> str:
     conversation = _conversation_block(context)
     rules = ""
@@ -711,7 +785,12 @@ def _planner_prompt(question: str, original: str, context, understanding: dict) 
     wording = f"\n(The user's original wording: {original})" if original != question else ""
     technology = (understanding or {}).get("technology")
     hint = f"\nMain technology: {technology}" if technology else ""
+    if (understanding or {}).get("intent") == "advice":
+        rules += ADVICE_PLANNER_RULES
     return f"""Generate {MAX_SUB_QUESTIONS} specific web search sub-questions for the question below, and say where each is best answered.
+
+{temporal.date_line()}
+DATES IN QUERIES: when the question asks about the latest, recent, current or upcoming state of something, write queries for the current year, or leave the year out and use words like "latest". Never put an earlier year in a query unless the user's question names that year.
 
 {conversation}Question: {question}{wording}{hint}
 
@@ -744,6 +823,7 @@ async def planner_node(state: ResearchState):
         except Exception as exc:
             logger.warning("Planner failed (%s); researching the question itself", type(exc).__name__)
             tasks = [ResearchTask(sub_question=question, technology=understanding.get("technology") or None)]
+        tasks = _refresh_task_years(tasks, f"{state['question']} {question}", understanding)
 
         sub_questions = [t.sub_question for t in tasks]
         sub_q_text = "\n".join(f"- {q}" for q in sub_questions)
@@ -913,6 +993,9 @@ def save_to_cache_node(state: ResearchState):
             return {}
         if "synthesis" in state and not state.get("citations"):
             logger.info("Not caching an answer without citations")
+            return {}
+        if temporal.is_time_sensitive(question, state.get("understanding")):
+            logger.info("Not caching a time-sensitive answer")
             return {}
 
         logger.info("Saving to cache...")

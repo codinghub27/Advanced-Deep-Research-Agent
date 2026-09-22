@@ -31,6 +31,9 @@ class QueryIntent(str, Enum):
     TROUBLESHOOTING = "troubleshooting"
     CODE = "code"
     CURRENT_EVENTS = "current_events"
+    # A judgment, review or career/learning advice about the user's own plan or project. The
+    # technologies it names are background, not the subject.
+    ADVICE = "advice"
 
 
 class TimeSensitivity(str, Enum):

@@ -2,7 +2,7 @@
 Planner integration + research pipeline + conversation persistence (+ the sources/router display in the chat UI)
 
 ## Status
-In Progress — implemented and verified: **503/503 offline tests** (the 346 existing tests are green; 157 new), UI display logic checked in a DOM emulator, live manual tests run against real Tavily + Groq + PostgreSQL (see Manual Tests). **Awaiting review and the git checkpoint** (nothing committed for this phase; Phase 5 was committed first as `924b99e`).
+In Progress — implemented and verified: **515/515 offline tests** (the 346 existing tests are green; 169 new), UI display logic checked in a DOM emulator, live manual tests run against real Tavily + Groq + PostgreSQL (see Manual Tests). Committed as `880f4e0` (Phase 5 was committed first as `924b99e`); the calibration fixes and this doc's final results were made after that commit's tests ran and are described here.
 
 ## Goal
 A question gets a cited, multi-source research answer; follow-ups understand the conversation; every turn is stored; the chat UI shows which sources the router searched and which sources the answer cites.
@@ -11,7 +11,7 @@ A question gets a cited, multi-source research answer; follow-ups understand the
 - **A — source-aware planner:** the planner proposes sources per sub-question; a deterministic router (`route_task`) validates and enforces.
 - **B — research pipeline:** in-memory evidence pool → one gap round → evidence-only synthesis with `[N]` citations → critic → at most one retry.
 - **C — conversation persistence:** sessions, turns and citations in the database (Alembic), context-aware query understanding and planning, session endpoints.
-- **UI:** cited-source chips, a "N sources" footer, a sources/search-plan panel and a live router panel, with built-in symbols only.
+- **UI:** numbered source markers in the answer, a collapsible Sources panel, a Search-plan drawer and a live router panel, with built-in symbols only (no favicon service).
 
 ## Out of Scope
 Qdrant writes, embeddings, semantic-cache redesign (Phase 12), BM25/hybrid/rerank, evidence persistence, cross-session context, multi-round research, GitHub/Reddit APIs, new providers, prompt-injection defence, streaming redesign, Docker, Redis, LangSmith.
@@ -39,7 +39,7 @@ There is no edge back to an earlier node: the gap round and the retry are bounde
 - Planner output: per sub-question `text`, `source_intent` (8 values), `suggested_sources`, `technology` (`SourceAwarePlan`; all fields required so the JSON schema is strict-mode safe). Legacy output (`sub_questions: list[str]`) still works.
 - `route_task(task, understanding) -> RoutingDecision` (`sources/routing/task_router.py`): pure, deterministic, no LLM. Reuses `detect_signals` / `route_sources` (Phase 5).
   - Sources come from the valid planner suggestions (origin `planner`), else the intent defaults (`policy`), else the Phase 5 route over the whole resolved question (`fallback`).
-  - Rules for planner-led decisions: (1) registry technology + technical task ⇒ `official_docs` enforced; Reddit never substitutes; (2) no technical signal ⇒ web only (Reddit kept only where Phase 5 selects it); (3) `MAX_SOURCES_PER_TASK` cap trims Reddit, then GitHub — docs and web are never trimmed; (4) `SOURCE_ROUTER_ENABLED=false` / `OFFICIAL_DOCS_ENABLED=false` honoured.
+  - Rules for planner-led decisions: (1) registry technology + technical task ⇒ `official_docs` enforced; Reddit never substitutes; (2) no technical signal ⇒ web only (docs/GitHub stay only if the sub-question itself calls for them; Reddit only if the *user's* question asks for community views — a planner writing "Reddit" into its own sub-question does not count); (3) `MAX_SOURCES_PER_TASK` cap trims Reddit, then GitHub (GitHub first when the user's question asks for community experience) — docs and web are never trimmed; (4) `SOURCE_ROUTER_ENABLED=false` / `OFFICIAL_DOCS_ENABLED=false` honoured.
   - A hint-less task gets the Phase 5 route unchanged (a four-source route is not trimmed).
   - `RoutingDecision`: `task_id`, `sub_question`, `source_intent`, ordered `sources`, `origins`, `dropped` (with reasons), `stage` (search / gap_search / retry) and, after execution, per-source `outcomes` (status, result count, latency, error code).
 - A sub-question inherits the run's technology only when it has none of its own and is technical or has no intent (`task_technology`): "Best laptops" in a LangGraph session stays web-only.
@@ -49,7 +49,7 @@ There is no edge back to an earlier node: the gap round and the retry are bounde
 - `EvidencePool` (in memory, per request): documents grouped by sub-question, exact duplicates (same URL + same text) removed while keeping the link to every sub-question that found it, coverage per sub-question (a document counts when it contains ≥ `RELEVANCE_THRESHOLD` of the sub-question's key words).
 - Gap detection: zero evidence ⇒ gap ⇒ up to `MAX_TARGETED_QUERIES` keyword follow-up queries (no LLM); a sub-question answered by one source type only is a reported soft gap, not a trigger. One round.
 - Synthesis: the LLM writes plain text and cites numbered sources; **code** builds the `SynthesisResult` — markers found outside code, renumbered by first use, citations listed, `confidence` derived by rule, covered/missed sub-questions from the pool. Nothing depends on JSON output from the model. No evidence ⇒ acknowledgment, low confidence, and the model is not called. Model failure ⇒ source list, low confidence.
-- Critic: deterministic checks (orphan citation numbers, uncited paragraphs, technical answer citing only Reddit, retrieved-but-uncited official docs, sub-questions with no evidence) + one LLM check (coverage, unsupported claims, missing information, suggested searches). Verdict `good | needs_improvement | bad`. If the LLM check fails, the deterministic verdict stands.
+- Critic: deterministic checks (orphan citation numbers, uncited paragraphs, technical answer citing only Reddit, retrieved-but-uncited official docs, sub-questions with no evidence) + one LLM check (coverage, unsupported claims, missing information, suggested searches). Verdict `good | needs_improvement | bad`. The model's own findings are low severity for one or two flagged claims and for "missing information" (calibrated on live runs, where every answer was otherwise `needs_improvement`); three flagged claims or an answer that misses the question are medium/high. If the LLM check fails, the deterministic verdict stands.
 - Retry (once): for `bad`, or `needs_improvement` with a high-severity issue. It searches the critic's suggested queries (if any are new) and re-writes with the critic's findings in the prompt; a retry with nothing new to search still re-writes from the same evidence. The better-reviewed attempt is kept (the retry wins ties). A second `bad` verdict returns the best result with a limitations note and low confidence.
 - `format_response`: removes dead `[N]` markers from the text, appends the limitations note when the final verdict is `bad`, settles confidence, and produces the citation list.
 
@@ -121,29 +121,65 @@ Run with **real Tavily + real Groq + real PostgreSQL 18** (a throwaway database,
 3. *Critic:* nine of nine verdicts were `needs_improvement` because the LLM reviewer flags something on every long answer. One or two flagged claims and "missing information" items are now low severity (still listed, and still feed the retry queries); three flagged claims, or an answer that misses the question, stay medium/high.
 4. *Outcomes:* `no_official_results` / `no_domain_results` / Tavily's "No search results found" are reported as `empty`, not `failed` (a first-run Test 1 showed a false red "failed" for docs).
 
-RERUN_PLACEHOLDER
+**Re-run after those fixes (Tests 1, 6, 7; same setup, new scratch database, dropped afterwards):**
+
+| # | Result |
+|---|---|
+| 1 | critic **`good`**, confidence **high**; 21 evidence pieces, 11 citations; one docs search that returned nothing verified now shows as `empty`, not `failed` |
+| 6 | routing now **official_docs (router) + reddit + web**, GitHub dropped by the cap (reddit kept, as the question asks for developers' problems); critic `needs_improvement`, one retry; 19 evidence, 9 citations; 107 s |
+| 7 | all three sub-questions **web only**, nothing else searched (as required); critic `needs_improvement`; 9 evidence, 9 citations; 73 s. (The planner did not write a "Reddit" sub-question this time; the unit test `test_the_planner_writing_reddit_into_a_sub_question_does_not_unlock_reddit_for_a_non_technical_question` pins the fix.) |
+
+Not re-run after the calibration: Tests 2-5, 8, 9 (their routing did not depend on the fixed rules, except that verdicts would now be more often `good`).
 
 ### Citations display: browser checks still to do (not verifiable from the CLI)
 Panel collapsed by default and expands on click · badge colours per type · clicking `[N]` scrolls to and flashes the card and opens a collapsed panel · card opens the URL in a new tab · dark and light theme (toggle) · phone width (cards stack, badge wraps, avatar hidden under 480 px) · no citations → no panel · an old answer without citations renders normally · reload a session and a cache hit show the panel · two answers in one chat behave independently.
 
-Automated: `python -m unittest discover -s tests -t .` → **510 OK** (503 + 7 in `tests/test_citations_display.py`); `node tests/ui/check_sources_ui.js` (jsdom, scratch install) → all checks pass.
+Automated: `python -m unittest discover -s tests -t .` → **515 OK** (346 existing + 162 in the three `test_p6_*` modules + 7 in `tests/test_citations_display.py`); `node tests/ui/check_sources_ui.js` (jsdom, scratch install) → all checks pass.
 
 ## Commands Run
 ```text
-python -m unittest discover -s tests -t .      # baseline 346 OK → 503 OK
-node tests/ui/check_sources_ui.js               # 28 display checks (jsdom, not a project dependency)
+python -m unittest discover -s tests -t .      # baseline 346 OK → 515 OK
+node tests/ui/check_sources_ui.js               # display checks in jsdom (not a project dependency)
 manual_e2e.py (scratchpad)                      # real Tavily + Groq + PostgreSQL scratch DB; LangSmith forced off
 ```
 
 ## Test Results
-- **503/503** offline (deterministic; no live Tavily, LLM or database). New: routing/planner/understanding (49), pipeline (61), persistence/API/cache (52+).
+- **515/515** offline (deterministic; no live Tavily, LLM or database). New: routing/planner/understanding (52), pipeline (61), persistence/API/cache (49), citations display (7).
 - Real bugs the tests caught while building: citation timestamps arrived as ISO strings and the `DateTime` column rejected them (every real save would have failed — logged, never a 500); the run-level technology leaked into unrelated sub-questions (laptops got official docs); a retry was refused when an answer's citations were all wrong; orphan `[N]` markers stayed in the final text.
-- UI: 28 checks in jsdom (chips, code blocks untouched, escaping, `javascript:` URLs, panel, Escape). **Not checked in a real browser** (layout/visuals).
+- UI: `tests/ui/check_sources_ui.js` (jsdom) checks the committed display code. **Not checked in a real browser** (layout/visuals; see the browser checklist above). The first chip/popover version (28 jsdom checks) was replaced by the superscript-marker version.
 
 ## Security / Reliability Notes
 - Retrieved text is still untrusted and enters prompts as before (Phase 14). New UI text goes through `textContent`/`esc()`; citation URLs are http(s)-validated server-side (`HttpUrl`) and again in the page.
 - Every new stage degrades instead of failing the run: critic crash ⇒ unreviewed answer, understanding/planner crash ⇒ complex/standalone/one sub-question, gap/retry search failure ⇒ skipped, save failure ⇒ logged. One source failing never affects another.
 - Bounded work: ≤ `CONCURRENCY_LIMIT` searches in flight; one gap round + one retry; extra searches ≤ 2 × sources per round.
+
+## Real-time research fix (follow-up to Phase 6)
+**Problem:** for "latest AI news" the planner wrote queries with 2023/2024 although the year is 2026: no prompt told the model the date, and Tavily had no date window.
+**Fix (`agent/temporal.py`, pure and deterministic; wired into `agent/state.py`, `pipeline/synthesis.py`, `pipeline/critic.py`):**
+- **Today's date** (`TODAY'S DATE: … current year is …`) in the query-understanding, planner, synthesis and critic prompts. The planner is told not to put an earlier year in a query unless the user named it; the synthesizer is told to judge freshness, lead with the newest sources, and say how old a source is.
+- **Past-year guard:** for a time-sensitive question a past year the model wrote on its own becomes the current year (`2023 vs 2024` collapses to one year), in the planner's tasks and again in `_research_update`, the one place every web search passes (main, gap and retry passes). A year the user wrote is kept; evergreen questions are untouched.
+- **Date window:** time-sensitive questions send Tavily `time_range` (week for "today/this week", month for news/"current", year for "latest/recent/emerging") and `topic="news"` when the question says news. If the window returns nothing, the search is retried **once** without it.
+- **Source dates:** a source's `published_at`, when the provider gives one, is shown to the synthesizer as `(published YYYY-MM-DD)`.
+- **Cache:** time-sensitive questions bypass the semantic cache (no lookup, no save), so "latest …" is never answered from yesterday. Phase 12 replaces this with TTL/freshness metadata.
+- **Time-sensitive** = the model's `time_sensitivity` is recent/current, intent is `current_events`, or the wording matches (latest, newest, recent, current, today, this week/month/year, news, breaking, trending, upcoming, emerging, state of the art, what's new, release notes, …). Bare "now"/"new" are deliberately not triggers.
+- **Config:** `RECENCY_FILTER_ENABLED` (default true) turns off the Tavily date window only. Documented in `.env.example`.
+- **Tests:** `tests/test_realtime_research.py` (22). Full suite 537 OK. Disabling the guard and the filter makes 4 of the 10 search/plan tests fail.
+- **Limits:** official-docs, GitHub and Reddit searches get no date window (docs are version-specific; those adapters are unchanged). Tavily is documented to return `published_date` mainly for `topic="news"` (not checked live here), so many web sources may show no date. The wording list is English-only. A year buried in a non-time-sensitive question is not touched.
+
+## Source-selection fix for advice / review questions (follow-up to Phase 6)
+**Problem (seen live):** "review my LangGraph + Tavily + FastAPI agent; is it worth building for a B.Tech student; does it help in interviews?" searched official docs (Tavily docs) and GitHub (similar repos), and the answer was the fallback "language model did not respond". Three causes:
+1. **Descriptive mentions counted as requests.** The words GitHub / Reddit / LangGraph / Tavily described the user's own project, but the router read them as "search there" and "official docs for this technology".
+2. **No advice intent.** Nothing told the pipeline that the technologies were background and the question wants what people say about the decision.
+3. **A short honest reply was treated as a failure.** With off-topic evidence an evidence-only model answers tersely; any reply under 50 characters was discarded and shown as "the model did not respond". The real error (type only) was never logged.
+
+**Fix:**
+- **`advice` intent** (`QueryIntent.ADVICE`; classifier prompt): a judgment, review or career/learning advice about the user's own plan; technology left empty. The planner gets advice-specific rules (no docs/GitHub, `community_experience`, suggested sources reddit + web, plain-language questions, not keyword lists).
+- **Router (`route_task`):** an advice sub-question goes to **Reddit + web only**; planner suggestions of official docs or GitHub are dropped and reported (`advice_question`, shown in the search plan). A sub-question that is itself technical (technical intent or a documentation lookup) is routed as before. Outside advice questions nothing changed.
+- **Descriptive mentions (`routing/router.py`):** a Reddit/GitHub mention after a third-person description verb ("searches across the web, GitHub and Reddit", "scrapes Reddit") is not an explicit request; "search GitHub and Reddit for …" still is.
+- **Synthesis:** a short reply **with** a citation is a normal answer; a short **uncited** reply is kept and the sources are listed under it (low confidence); only an empty reply or an exception is a failure, and the log now carries the message (`Synthesis failed (RuntimeError: <message>)`).
+- **Query length:** queries are cut to Tavily's 400-character limit at a word boundary (a long pasted question reached a search unchanged when the planner failed).
+- **Tests:** `tests/test_source_selection_advice.py` (16). Full suite 553 OK; with the descriptive-mention guard and the advice branch disabled, 3 of 7 routing tests fail.
+- **Limits:** the classifier decides `advice` (an LLM call), so a mislabelled question gets the old routing. Reddit search is Tavily restricted to reddit.com; whether it returns anything for a given query is up to Tavily (not verified live). The evidence-only synthesis rule still means an opinion question is answered from what sources say, not from the model's own judgment.
 
 ## Known Issues
 - **Latency and cost:** a complex question now makes ~4–6 LLM calls (understanding, planner, synthesis, critic; + synthesis and critic on a retry) and up to ~12 Tavily searches, plus ≤ 12 more for gap/retry. Kill switches: `GAP_SEARCH_ENABLED`, `MAX_CRITIC_RETRIES=0`, `SOURCE_ROUTER_ENABLED`.
