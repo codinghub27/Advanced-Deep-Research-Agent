@@ -3,7 +3,9 @@
 Import from here, e.g. ``from research_app.domain import SourceDocument``.
 """
 from research_app.domain.enums import (
+    AuthorityLevel,
     Complexity,
+    ContentClassification,
     CriticIssueKind,
     CriticSeverity,
     CriticVerdict,
@@ -60,14 +62,14 @@ from research_app.domain.pipeline import (
 )
 
 __all__ = [
-    "AnswerCache", "Citation", "Complexity", "ConversationContext", "ConversationTurn",
-    "CriticIssue", "CriticIssueKind", "CriticResult", "CriticSeverity", "CriticVerdict",
-    "DateConfidence", "DroppedSource", "FreshnessCategory", "ORIGIN_FALLBACK", "ORIGIN_PLANNER",
-    "ORIGIN_POLICY", "ResearchMetadata", "ResearchResponse", "RoutingDecision", "SourceIntent",
-    "SourceOutcome", "SynthesisResult", "Evidence", "Gap", "GapAnalysis", "GapKind", "HistoryTurn",
-    "QueryIntent", "ResearchError", "ResearchQuery", "ResearchResult",
-    "ResearchRun", "ResearchTask", "ResultStatus", "RetrievalFilter", "RetrievalMode",
-    "RetrievedChunk", "Reranker", "Retriever", "RunStatus", "SearchRequest",
+    "AnswerCache", "AuthorityLevel", "Citation", "Complexity", "ConversationContext",
+    "ConversationTurn", "ContentClassification", "CriticIssue", "CriticIssueKind", "CriticResult",
+    "CriticSeverity", "CriticVerdict", "DateConfidence", "DroppedSource", "FreshnessCategory",
+    "ORIGIN_FALLBACK", "ORIGIN_PLANNER", "ORIGIN_POLICY", "ResearchMetadata", "ResearchResponse",
+    "RoutingDecision", "SourceIntent", "SourceOutcome", "SynthesisResult", "Evidence", "Gap",
+    "GapAnalysis", "GapKind", "HistoryTurn", "QueryIntent", "ResearchError", "ResearchQuery",
+    "ResearchResult", "ResearchRun", "ResearchTask", "ResultStatus", "RetrievalFilter",
+    "RetrievalMode", "RetrievedChunk", "Reranker", "Retriever", "RunStatus", "SearchRequest",
     "SourceAdapter", "SourceChunk", "SourceCredibility", "SourceDocument", "SourceFreshnessStatus",
     "SourceType", "TaskStatus", "TimeSensitivity", "canonical_url", "new_id", "source_id_for",
     "utc_now",

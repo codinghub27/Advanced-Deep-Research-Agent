@@ -69,10 +69,10 @@ class DomainIsolationTests(unittest.TestCase):
     def test_sources_packages_pull_in_no_app_or_framework_modules(self):
         # Phase 4/5: the official-docs and routing packages (registry, detector, adapters,
         # router) must stay importable without LangChain/LangGraph/agent code, like the
-        # rest of sources/.
+        # rest of sources/. P1.4: the content classifier too.
         code = (
             "import sys, research_app.sources, research_app.sources.official_docs, "
-            "research_app.sources.routing\n"
+            "research_app.sources.routing, research_app.sources.classification\n"
             "bad = sorted(m for m in sys.modules if m.split('.')[0] in "
             "{'langgraph','langchain_core','langchain','langchain_groq','langchain_tavily',"
             "'qdrant_client','sqlalchemy','fastapi'} "

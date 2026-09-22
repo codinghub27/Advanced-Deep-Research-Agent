@@ -156,3 +156,37 @@ class SourceFreshnessStatus(str, Enum):
     UNKNOWN = "unknown"
     FUTURE_INVALID = "future_invalid"
     DATE_CONFLICT = "date_conflict"
+
+
+class ContentClassification(str, Enum):
+    """A finer-grained content type than ``SourceType`` (P1.4). ``SourceType`` is the routing
+    bucket (web/official_docs/github/reddit/...) and is unchanged and still load-bearing
+    everywhere (routing, synthesis labels, citations, the DB); this is an additional,
+    optional classification of *what kind of document* a source actually is, so a preprint
+    is never presented as peer-reviewed, a blog as an academic paper, or a snippet as a
+    complete source."""
+    OFFICIAL_DOCUMENTATION = "official_documentation"
+    OFFICIAL_ANNOUNCEMENT = "official_announcement"
+    RESEARCH_PAPER = "research_paper"
+    PREPRINT = "preprint"
+    SURVEY = "survey"
+    TECHNICAL_REPORT = "technical_report"
+    GITHUB_REPOSITORY = "github_repository"
+    GITHUB_ISSUE_OR_DISCUSSION = "github_issue_or_discussion"
+    REDDIT_POST_OR_DISCUSSION = "reddit_post_or_discussion"
+    NEWS_REPORT = "news_report"
+    EXPERT_BLOG = "expert_blog"
+    SEARCH_SNIPPET = "search_snippet"
+    UNKNOWN = "unknown"
+
+
+class AuthorityLevel(str, Enum):
+    """How much weight a source's *type* carries on its own (P1.4), independent of its
+    freshness. Not a quality score: a ``COMMUNITY`` source can still be correct, it just
+    is not treated as authority for official API/configuration behavior (Phase 4/5 rule,
+    now keyed off this field instead of being implicit)."""
+    OFFICIAL = "official"
+    ACADEMIC = "academic"
+    ESTABLISHED = "established"
+    COMMUNITY = "community"
+    UNKNOWN = "unknown"

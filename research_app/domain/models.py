@@ -23,7 +23,9 @@ from urllib.parse import urlsplit, urlunsplit
 from pydantic import AfterValidator, BaseModel, ConfigDict, Field, model_validator
 
 from research_app.domain.enums import (
+    AuthorityLevel,
     Complexity,
+    ContentClassification,
     CriticIssueKind,
     CriticSeverity,
     CriticVerdict,
@@ -197,6 +199,14 @@ class SourceDocument(DomainModel):
     credibility: SourceCredibility = Field(default_factory=SourceCredibility)
     query: Optional[str] = None
     task_id: Optional[str] = None
+    # P1.4: a finer content-type classification than source_type, set by
+    # sources.classification.classify_content(); never set by a provider or from result text.
+    content_classification: Optional[ContentClassification] = None
+    classification_confidence: Optional[Score] = None
+    classification_reason: Optional[str] = None
+    authority_level: Optional[AuthorityLevel] = None
+    is_primary_source: Optional[bool] = None
+    independently_verified: bool = False
     metadata: dict[str, Any] = Field(default_factory=dict)  # source-specific
 
     @model_validator(mode="after")
