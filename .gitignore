@@ -63,3 +63,9 @@ local_settings.py
 
 # Phase 7 manual-test Qdrant data (scripts/rag_manual.py)
 .rag_manual/
+
+# Local Claude Code tooling (config, MCP servers, caches) — not part of the project
+.claude/
+.mcp.json
+.token-savior-cache.json
+cc_shortcuts.txt
