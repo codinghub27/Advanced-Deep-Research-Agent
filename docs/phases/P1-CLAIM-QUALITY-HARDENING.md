@@ -6,8 +6,8 @@ evidence, provider-failure visibility, minimum security hardening). This is a se
 document, not a renumbering of `PHASE-01`..`PHASE-19`; those keep their own status.
 
 ## Status
-In Progress — P1.1, P1.2 and P1.4 implemented and verified (668/668 offline tests, 0 pyright
-errors on touched files). P1.3, P1.5–P1.14 not started.
+In Progress — P1.1, P1.2, P1.4 and P1.6 implemented and verified (681/681 offline tests, 0
+pyright errors on touched files). P1.3, P1.5, P1.7–P1.14 not started.
 
 ## Goal
 See the accepted P1 directive (approved by the user). Summary: freshness classification and date
@@ -28,6 +28,10 @@ GitHub, Reddit, the hybrid RAG pipeline, or the LangGraph structure).
   `classify_content()`: a finer `ContentClassification` (13 values) + `classification_confidence`
   + `classification_reason` + `AuthorityLevel` + `is_primary_source` + `independently_verified`
   on top of the existing (unchanged) `SourceType` routing bucket.
+- **P1.6 — Claim/evidence model**: new `Claim` domain model (`domain/models.py`) with
+  `ClaimType`/`ClaimSupportStatus`/`ClaimVerificationStatus` (`domain/enums.py`); `Citation`
+  gains a stable `citation_id` (distinct from the renumberable `marker`) for a claim to
+  reference; `ResearchRun.claims` added.
 
 ## Out of Scope (this update)
 - P1.3 (wiring the freshness policy into `semantic_cache_node`/the RAG gate — the cache and RAG
@@ -37,7 +41,10 @@ GitHub, Reddit, the hybrid RAG pipeline, or the LangGraph structure).
   labels (`agent/state.py`, `domain/legacy.py`) — deferred to P1.8/P1.9 (synthesis/critic
   updates), which are the natural place to make the existing source-authority rules *depend on*
   the recorded classification, per the P1 directive's own phrasing.
-- P1.5, P1.6, P1.7, P1.10–P1.14, and anything in CLAUDE.md Phases 8–19.
+- Nothing yet *builds* a `Claim` from a real synthesized answer. `synthesis.py`'s marker-finding
+  code (`_citation`, Phase 6) is unchanged; extracting claims from the model's free text is
+  P1.7/P1.8 work, once citation verification exists to feed `support_status`/`verification_status`.
+- P1.5, P1.7, P1.10–P1.14, and anything in CLAUDE.md Phases 8–19.
 
 ## Current Implementation
 Before this update: only `agent/temporal.py:is_time_sensitive` existed (a boolean, no category);
@@ -121,13 +128,24 @@ list falls through to `unknown` rather than being guessed. `www.` is ignored on 
 matching (same convention as Phase 4/5's registries), matching only, `SourceDocument.domain`
 itself is untouched.
 
+### Claim model (P1.6)
+`Claim`: `claim_id`, `run_id`, `text`, `claim_type` (fact/inference/recommendation/opinion/
+estimate/summary), `evidence_ids`, `source_ids`, `excerpts`, `citation_id`, `support_status`
+(directly/partially/indirectly supported, unsupported, contradicted, not_applicable),
+`evidence_strength` (0-1), `freshness_status` (reuses `SourceFreshnessStatus` from P1.2 --
+one claim can be flagged stale even if the overall run is not), `conflict_status` (bool),
+`verification_status` (unverified/verified/failed/revised/removed -- P1.7 sets this).
+`Citation.citation_id` (new, `default_factory=new_id`) gives a claim something stable to point
+to, since `Citation.marker` is renumbered by synthesis (Phase 6) and is not a durable key.
+`ResearchRun.claims: list[Claim]` added alongside the existing `citations`/`evidence` lists.
+
 ## Files Changed
 - **Modified:** `research_app/domain/enums.py`, `research_app/domain/models.py`,
   `research_app/domain/__init__.py`, `research_app/sources/normalizer.py`,
   `research_app/agent/temporal.py`, `tests/test_domain_isolation.py` (+1 module in the
   sources-package isolation check, no behavior change).
 - **Created:** `research_app/sources/classification.py`, `tests/test_date_freshness.py`,
-  `tests/test_content_classification.py`, this document.
+  `tests/test_content_classification.py`, `tests/test_claim_model.py`, this document.
 - **Not touched:** `agent/state.py`, `agent/graph.py`, `main.py`, `db/*`, `rag/*`, any prompt,
   any existing test file's assertions (all existing tests pass unchanged).
 
@@ -176,6 +194,21 @@ itself is untouched.
   unrecognised URL-derived `kind` becomes `unknown` at confidence 0.3, not a best-guess
   `github_repository`/`reddit_post_or_discussion` — directly implements "do not treat... repository
   lists as proof of importance".
+- **`Claim` is a plain data model with no validators enforcing "opinions get NOT_APPLICABLE".**
+  The P1 directive's ranking is guidance for the code that *creates* claims (P1.7/P1.8), not an
+  invariant of the shape itself -- an opinion claim quoting a source that states that exact
+  opinion verbatim legitimately can be `DIRECTLY_SUPPORTED`. Forcing it in the model would make
+  that case impossible to represent.
+- **`Citation.citation_id` is new, `Citation.marker` is unchanged.** `marker` stays the
+  answer-facing "[1]" text (renumbered by synthesis, Phase 6); `citation_id` is a stable key
+  nothing currently sets differently per-request (each `Citation()` call gets a fresh UUID via
+  `default_factory`), so persisting a `Claim.citation_id` in P1.5 will need the *same* `Citation`
+  object's id at both write times, not two independently-constructed citations.
+- **No claim-extraction code yet.** Building `Claim`s from a real answer means walking the
+  synthesized text and its markers, deciding `claim_type` and initial `support_status` -- that
+  logic belongs with P1.7 (citation verification), which needs the same text-walk to check
+  entailment; building the model without it first, as a separate change, keeps this diff to a
+  pure, reviewable data-shape addition (Rule 5).
 
 ## Dependencies
 None added or removed. Stdlib only (`dataclasses`, `datetime.timedelta`) plus the existing
@@ -189,24 +222,28 @@ missing publication date) against a live server.
 
 ## Commands Run
 ```text
-PYTHONDONTWRITEBYTECODE=1 .venv/Scripts/python -W ignore -m unittest discover -s tests -t .   # 620 OK (baseline, dirty tree) -> 650 OK (P1.1/P1.2) -> 668 OK (P1.4)
-npx -y pyright --pythonpath .venv/Scripts/python.exe research_app/domain/enums.py research_app/domain/models.py research_app/domain/__init__.py research_app/sources/normalizer.py research_app/agent/temporal.py research_app/sources/classification.py tests/test_content_classification.py   # 0 errors
+PYTHONDONTWRITEBYTECODE=1 .venv/Scripts/python -W ignore -m unittest discover -s tests -t .   # 620 OK (baseline, dirty tree) -> 650 OK (P1.1/P1.2) -> 668 OK (P1.4) -> 681 OK (P1.6)
+npx -y pyright --pythonpath .venv/Scripts/python.exe research_app/domain/enums.py research_app/domain/models.py research_app/domain/__init__.py research_app/sources/normalizer.py research_app/agent/temporal.py research_app/sources/classification.py tests/test_content_classification.py tests/test_claim_model.py   # 0 errors
 ```
 
 ## Test Results
 - New: `tests/test_date_freshness.py` (30 tests: freshness classification, per-source evaluation,
   relative-date parsing, normalizer date extraction incl. an explicit equivalence test that a
-  result with no date fields normalizes exactly as before this change) and
-  `tests/test_content_classification.py` (18 tests: each `source_type` branch, the www-stripping
-  domain match, the preprint/peer-review distinction, the "no metadata → don't upgrade" guard,
-  and a purity test that `classify_content` doesn't mutate the input or any unrelated field).
-- Full suite: **668/668 pass** (620 pre-existing incl. the dirty working tree at session start,
-  +30 P1.1/P1.2, +18 P1.4). `test_domain_isolation` (extended, still green), `test_domain_models`,
-  and `test_source_normalizer` (the Phase 3 pinned equivalence test) all still pass.
-- Pyright on the 7 touched/created source and test files: 0 errors, 0 warnings (two incidental
-  `Score`-vs-`float` comparison errors in the new test file were fixed with an explicit
+  result with no date fields normalizes exactly as before this change), `tests/test_content_classification.py`
+  (18 tests: each `source_type` branch, the www-stripping domain match, the preprint/peer-review
+  distinction, the "no metadata → don't upgrade" guard, and a purity test that `classify_content`
+  doesn't mutate the input or any unrelated field), and `tests/test_claim_model.py` (13 tests: safe
+  defaults, validation of empty text/unknown fields/out-of-range strength, every `ClaimType`/
+  `ClaimSupportStatus` value is constructible, `Citation.citation_id` is stable and distinct
+  per-instance, `ResearchRun.claims` round-trips).
+- Full suite: **681/681 pass** (620 pre-existing incl. the dirty working tree at session start,
+  +30 P1.1/P1.2, +18 P1.4, +13 P1.6). `test_domain_isolation` (extended, still green),
+  `test_domain_models`, and `test_source_normalizer` (the Phase 3 pinned equivalence test) all
+  still pass.
+- Pyright on all touched/created source and test files: 0 errors, 0 warnings (two incidental
+  `Score`-vs-`float` comparison errors in an earlier test file were fixed with an explicit
   `float(...)` cast; two pre-existing `BaseRoute.path` errors in `test_domain_isolation.py`,
-  unrelated to the one line this slice added there, are untouched baseline noise).
+  unrelated to the lines this update touched there, are untouched baseline noise).
 
 ## Known Issues
 - **Not yet load-bearing.** Nothing in the running graph calls `classify_freshness`,
@@ -238,16 +275,24 @@ npx -y pyright --pythonpath .venv/Scripts/python.exe research_app/domain/enums.p
   No live verification was performed for this slice.
 - **News/paper/blog detection is domain-only**, not content-based: a personal blog hosted on a
   news domain's subdomain, or a paper mirrored off its recognised venue, is not detected.
+- **`Claim` is an empty shape with nothing populating it.** No code anywhere constructs a `Claim`
+  from a real research run yet; `ResearchRun.claims` will be `[]` for every run until P1.7/P1.8.
 - Carried over from Phase 7 (untouched by this slice): `SOURCE_RAG_ENABLED=false` (not
   production-ready), PostgreSQL path only manually verified once, `.env.example` still not
   updated for Phase 7's RAG variables (blocked by session permissions in that earlier session).
 
 ## Git Commit
-Pending — recommended message: `p1.4: source-type (content) classification`. (P1.1/P1.2 were
-committed separately as `1e6d3ec`, per CLAUDE.md Rule 4 — one architectural change per commit.)
+- `1e6d3ec` — p1.1-p1.2: freshness classification and date extraction/normalization
+- `b148901` — p1.4: source-type (content) classification
+- Pending — recommended message: `p1.6: claim/evidence domain model`. (Per CLAUDE.md Rule 4, one
+  architectural change per commit; each P1 sub-part above is its own commit on
+  `phase-7-hybrid-rag`.)
 
 ## Next Phase
-P1.6 — claim/evidence model (claim text, claim type, supporting evidence/source ids, support
-status, evidence strength), before P1.5 (persistence) so the persisted shape is settled first, per
-the inspection report's recommended sequence. Then P1.7 (citation verification), which can finally
-consume both this slice's freshness/classification fields and P1.6's claim model together.
+P1.5 — minimal durable evidence persistence: Alembic migration adding tables for research runs,
+claims, and per-source-outcome records, reusing the `Claim`/`RoutingDecision`/`SourceOutcome`
+shapes now in place. This is the first step in this initiative that touches the database schema
+and is a heavier, separate change from the pure-domain-model slices above; it should get its own
+careful review of migration ordering against `0001_baseline`/`0002_conversations`. Then P1.7
+(citation verification), which needs both P1.5's persistence and P1.6's claim model to record its
+findings against.

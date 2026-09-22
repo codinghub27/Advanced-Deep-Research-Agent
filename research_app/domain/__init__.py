@@ -4,6 +4,9 @@ Import from here, e.g. ``from research_app.domain import SourceDocument``.
 """
 from research_app.domain.enums import (
     AuthorityLevel,
+    ClaimSupportStatus,
+    ClaimType,
+    ClaimVerificationStatus,
     Complexity,
     ContentClassification,
     CriticIssueKind,
@@ -25,6 +28,7 @@ from research_app.domain.enums import (
 from research_app.domain.interfaces import AnswerCache, Reranker, Retriever, SourceAdapter
 from research_app.domain.models import (
     Citation,
+    Claim,
     CriticIssue,
     CriticResult,
     Evidence,
@@ -62,8 +66,9 @@ from research_app.domain.pipeline import (
 )
 
 __all__ = [
-    "AnswerCache", "AuthorityLevel", "Citation", "Complexity", "ConversationContext",
-    "ConversationTurn", "ContentClassification", "CriticIssue", "CriticIssueKind", "CriticResult",
+    "AnswerCache", "AuthorityLevel", "Citation", "Claim", "ClaimSupportStatus", "ClaimType",
+    "ClaimVerificationStatus", "Complexity", "ConversationContext", "ConversationTurn",
+    "ContentClassification", "CriticIssue", "CriticIssueKind", "CriticResult",
     "CriticSeverity", "CriticVerdict", "DateConfidence", "DroppedSource", "FreshnessCategory",
     "ORIGIN_FALLBACK", "ORIGIN_PLANNER", "ORIGIN_POLICY", "ResearchMetadata", "ResearchResponse",
     "RoutingDecision", "SourceIntent", "SourceOutcome", "SynthesisResult", "Evidence", "Gap",

@@ -24,6 +24,9 @@ from pydantic import AfterValidator, BaseModel, ConfigDict, Field, model_validat
 
 from research_app.domain.enums import (
     AuthorityLevel,
+    ClaimSupportStatus,
+    ClaimType,
+    ClaimVerificationStatus,
     Complexity,
     ContentClassification,
     CriticIssueKind,
@@ -294,6 +297,35 @@ class Citation(DomainModel):
     domain: Optional[str] = None
     snippet: Optional[str] = None
     retrieved_at: Optional[UtcDatetime] = None
+    # P1.6: a stable id a Claim can reference, independent of `marker` (which is
+    # renumbered/renamed by synthesis -- see PHASE-06's "renumbered by first use").
+    citation_id: str = Field(default_factory=new_id)
+
+
+class Claim(DomainModel):
+    """One important factual claim in a synthesized answer, and how well it is backed by
+    evidence (P1.6). Not the same as a ``Citation``: a citation maps an answer marker to a
+    source; a claim maps a specific sentence/statement to the evidence and citations that
+    justify it, and records whether that justification actually holds up.
+
+    Support status is set here after evidence collection; verification_status is set by the
+    P1.7 citation-verification pass (a fresh claim is always UNVERIFIED). Synthesis/critic
+    (P1.8/P1.9) must not present an INFERENCE claim as a directly established FACT.
+    """
+
+    claim_id: str = Field(default_factory=new_id)
+    run_id: Optional[str] = None
+    text: str = Field(min_length=1)
+    claim_type: ClaimType = ClaimType.FACT
+    evidence_ids: list[str] = Field(default_factory=list)
+    source_ids: list[str] = Field(default_factory=list)
+    excerpts: list[str] = Field(default_factory=list)
+    citation_id: Optional[str] = None  # Citation.citation_id, when this claim has one
+    support_status: ClaimSupportStatus = ClaimSupportStatus.UNSUPPORTED
+    evidence_strength: Optional[Score] = None
+    freshness_status: Optional[SourceFreshnessStatus] = None
+    conflict_status: bool = False  # True when contradicting evidence was found for this claim
+    verification_status: ClaimVerificationStatus = ClaimVerificationStatus.UNVERIFIED
 
 
 # --------------------------------------------------------------------------- gaps / critic
@@ -407,6 +439,7 @@ class ResearchRun(DomainModel):
     gap_analyses: list[GapAnalysis] = Field(default_factory=list)
     critic_results: list[CriticResult] = Field(default_factory=list)
     citations: list[Citation] = Field(default_factory=list)
+    claims: list[Claim] = Field(default_factory=list)  # P1.6
     final_answer: str = ""
     cache_hit: bool = False
     retry_count: int = Field(default=0, ge=0)

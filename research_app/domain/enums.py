@@ -180,6 +180,39 @@ class ContentClassification(str, Enum):
     UNKNOWN = "unknown"
 
 
+class ClaimType(str, Enum):
+    """What kind of statement a ``Claim`` is (P1.6). Synthesis/critic (P1.8/P1.9) must not
+    present an ``INFERENCE`` as a directly established ``FACT``."""
+    FACT = "fact"
+    INFERENCE = "inference"
+    RECOMMENDATION = "recommendation"
+    OPINION = "opinion"
+    ESTIMATE = "estimate"
+    SUMMARY = "summary"
+
+
+class ClaimSupportStatus(str, Enum):
+    """How well a claim's cited evidence actually backs it (P1.6/P1.7). ``NOT_APPLICABLE`` is
+    for opinion/recommendation claims, which are not "supported" by evidence the way a fact
+    is -- it is a valid value for those, not a forced one."""
+    DIRECTLY_SUPPORTED = "directly_supported"
+    PARTIALLY_SUPPORTED = "partially_supported"
+    INDIRECTLY_SUPPORTED = "indirectly_supported"
+    UNSUPPORTED = "unsupported"
+    CONTRADICTED = "contradicted"
+    NOT_APPLICABLE = "not_applicable"
+
+
+class ClaimVerificationStatus(str, Enum):
+    """Citation-verification outcome for a claim (P1.7). Set by the verification pass, not at
+    claim creation -- a fresh claim is always ``UNVERIFIED``."""
+    UNVERIFIED = "unverified"
+    VERIFIED = "verified"
+    FAILED = "failed"
+    REVISED = "revised"
+    REMOVED = "removed"
+
+
 class AuthorityLevel(str, Enum):
     """How much weight a source's *type* carries on its own (P1.4), independent of its
     freshness. Not a quality score: a ``COMMUNITY`` source can still be correct, it just
