@@ -24,5 +24,9 @@ NODE_LABELS = {
     "critic_node": "🧐 Reviewing the answer...",
     "retry_node": "🔁 Improving the answer...",
     "format_response": "📎 Preparing citations...",
-    "save_to_cache_node": "💾 Saving to cache..."
+    "save_to_cache_node": "💾 Saving to cache...",
+    # Phase 7: run unconditionally (index_sources_node is a no-op unless SOURCE_RAG_INGEST_ENABLED;
+    # source_rag_node only runs with SOURCE_RAG_ENABLED), so both need a label even with the flags off.
+    "source_rag_node": "📚 Checking stored sources...",
+    "index_sources_node": "💾 Indexing sources...",
 }
