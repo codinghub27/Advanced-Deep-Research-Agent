@@ -1,5 +1,11 @@
 # CLAUDE.md — Advanced Production-Grade Deep Research Agent
 
+# Token efficiency
+- Be concise. Prefer short explanations over long essays.
+- When showing code, show only changed parts unless full file is requested.
+- Avoid repeating the user’s prompt in your answer.
+- For exploratory tasks, summarize findings in ≤10 bullets.
+
 ## 1. Project Mission
 
 Upgrade the existing Deep Research Agent incrementally into a production-grade, reliable, multi-source research system.
